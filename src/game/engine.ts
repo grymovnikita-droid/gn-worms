@@ -9,6 +9,8 @@ import {
 } from "./types";
 import type { Team, Screen, Phase, Difficulty, UISnapshot, WeaponDef, MapId, BattleMode, HeroTypeDef } from "./types";
 import { sfx } from "./audio";
+import { loadWorkshop, saveWorkshop } from "./workshop";
+import type { WorkshopData, SpriteConfig } from "./workshop";
 
 // ---------- внутренние типы ----------
 interface Hero {
@@ -117,6 +119,10 @@ export class Engine {
 
   // плот
   private raft = { x: WORLD_W / 2, dir: 1, dx: 0, half: 36 };
+
+  // мастерская: пользовательские спрайты (герои, ящик, фон)
+  private spriteCfg: WorkshopData = {};
+  private sprites = new Map<string, HTMLImageElement>();
   // непрерывная область озера (вода растекается от центра): [lakeL, lakeR]
   private lakeL = 0;
   private lakeR = 0;
@@ -200,6 +206,10 @@ export class Engine {
     for (let i = 0; i < 40; i++) {
       this.embers.push({ x: sr() * WORLD_W, y: sr() * WORLD_H, vy: 12 + sr() * 26, drift: sr() * 30 - 15, size: 1 + sr() * 2.2, phase: sr() * 10 });
     }
+
+    // мастерская: загружаем сохранённые пользовательские спрайты
+    this.spriteCfg = loadWorkshop();
+    for (const [k, cfg] of Object.entries(this.spriteCfg)) this.loadSpriteImg(k, cfg.dataUrl);
 
     this.genTerrain(42);
     this.bind();
@@ -428,6 +438,41 @@ export class Engine {
     this.shopOpen = open;
     if (open) { this.charging = false; this.blinkMode = false; }
     this.emit();
+  }
+
+  // ================= МАСТЕРСКАЯ =================
+  getWorkshopData(): WorkshopData {
+    return this.spriteCfg;
+  }
+
+  /** Установить/обновить спрайт слота (key — id героя, "crate" или "bg") */
+  applySprite(key: string, cfg: SpriteConfig | null): boolean {
+    if (cfg) {
+      this.spriteCfg[key] = cfg;
+      this.loadSpriteImg(key, cfg.dataUrl);
+    } else {
+      delete this.spriteCfg[key];
+      this.sprites.delete(key);
+    }
+    const ok = saveWorkshop(this.spriteCfg);
+    this.emit();
+    return ok;
+  }
+
+  private loadSpriteImg(key: string, dataUrl: string) {
+    const img = new Image();
+    img.onload = () => {
+      this.sprites.set(key, img);
+      this.emit();
+    };
+    img.src = dataUrl;
+  }
+
+  private spriteOf(key: string): { img: HTMLImageElement; cfg: SpriteConfig } | null {
+    const cfg = this.spriteCfg[key];
+    const img = this.sprites.get(key);
+    if (!cfg || !img || !img.complete || img.naturalWidth === 0) return null;
+    return { img, cfg };
   }
 
   setMove(dir: -1 | 0 | 1) {
@@ -2011,6 +2056,17 @@ export class Engine {
     c.fillStyle = sky;
     c.fillRect(0, 0, cw, ch);
 
+    // свой задний фон из мастерской (растягивается на весь экран, cover)
+    const customBg = this.spriteOf("bg");
+    if (customBg) {
+      const img = customBg.img;
+      const ir = img.naturalWidth / img.naturalHeight;
+      const scr = cw / ch;
+      let dw = cw, dh = ch, dx = 0, dy = 0;
+      if (ir > scr) { dw = ch * ir; dx = (cw - dw) / 2; } else { dh = cw / ir; dy = (ch - dh) / 2; }
+      c.drawImage(img, dx, dy, dw, dh);
+    }
+
     const shk = this.paused ? 0 : this.shake;
     const shx = (Math.random() - 0.5) * shk;
     const shy = (Math.random() - 0.5) * shk;
@@ -2022,7 +2078,7 @@ export class Engine {
     const xMin = this.camX - cw / (2 * S) - 80;
     const xMax = this.camX + cw / (2 * S) + 80;
 
-    if (!inferno) {
+    if (!inferno && !customBg) {
       // туманности
       for (const nb of this.nebulae) {
         const g = c.createRadialGradient(nb.x, nb.y, 10, nb.x, nb.y, nb.r);
@@ -2059,7 +2115,7 @@ export class Engine {
       }
     }
     // северное сияние
-    if (frost) {
+    if (frost && !customBg) {
       c.save();
       c.globalCompositeOperation = "lighter";
       for (let band = 0; band < 2; band++) {
@@ -2085,7 +2141,7 @@ export class Engine {
     // луна / багровое солнце Преисподней
     const MOON_X = WORLD_W * 0.73;
     const mg = 1 + Math.sin(this.time * 0.8) * 0.05;
-    if (inferno) {
+    if (!customBg) if (inferno) {
       const sun = c.createRadialGradient(MOON_X, 120, 10, MOON_X, 120, 190 * mg);
       sun.addColorStop(0, "rgba(255,110,40,0.95)");
       sun.addColorStop(0.22, "rgba(220,60,20,0.7)");
@@ -2118,8 +2174,10 @@ export class Engine {
     const horCol = frost ? "rgba(90,160,220,0.08)" : jungle ? "rgba(120,220,120,0.10)" : inferno ? "rgba(255,110,40,0.16)" : "rgba(217,164,65,0.09)";
     hor.addColorStop(0, "rgba(0,0,0,0)");
     hor.addColorStop(1, horCol);
-    c.fillStyle = hor;
-    c.fillRect(xMin, 250, xMax - xMin, 180);
+    if (!customBg) {
+      c.fillStyle = hor;
+      c.fillRect(xMin, 250, xMax - xMin, 180);
+    }
 
     // световые лучи сквозь листву (джунгли)
     if (jungle) {
@@ -3012,6 +3070,20 @@ export class Engine {
     c.translate(cr.x, cr.y);
     if (!cr.landed) c.rotate(Math.sin(this.time * 2.4 + cr.x * 0.05) * 0.09);
 
+    // свой спрайт подарка из мастерской
+    const sprC = this.spriteOf("crate");
+    if (sprC) {
+      const pulse = 0.75 + 0.25 * Math.sin(this.time * 4 + cr.x);
+      const glow = c.createRadialGradient(0, 0, 2, 0, 0, 34);
+      glow.addColorStop(0, `rgba(245,214,123,${0.3 * pulse})`);
+      glow.addColorStop(1, "rgba(0,0,0,0)");
+      c.fillStyle = glow;
+      c.beginPath(); c.arc(0, 0, 34, 0, Math.PI * 2); c.fill();
+      c.drawImage(sprC.img, -sprC.cfg.w / 2, -sprC.cfg.h / 2 + sprC.cfg.offY, sprC.cfg.w, sprC.cfg.h);
+      c.restore();
+      return;
+    }
+
     if (!cr.landed) {
       c.strokeStyle = "rgba(207,198,168,0.9)";
       c.lineWidth = 1.1;
@@ -3292,6 +3364,19 @@ export class Engine {
     c.fillStyle = "rgba(0,0,0,0.38)";
     c.beginPath(); c.ellipse(0, -1, 16.5, 4.8, 0, 0, Math.PI * 2); c.fill();
 
+    // пользовательская модель из мастерской (якорь — низ по центру, стоит на земле)
+    const spr = this.spriteOf(h.type);
+    if (spr) {
+      const walkingS = h.onGround && isActive && this.moveInput !== 0;
+      const bobS = walkingS ? Math.abs(Math.sin(h.walkPhase)) * 1.5 : 0;
+      c.translate(0, -bobS);
+      c.scale(dir, 1); // авто-отражение по направлению взгляда
+      c.drawImage(spr.img, -spr.cfg.w / 2, -spr.cfg.h + spr.cfg.offY, spr.cfg.w, spr.cfg.h);
+      c.restore();
+      this.drawHeroTop(c, h, isActive, spr.cfg);
+      return;
+    }
+
     const walking = h.onGround && isActive && this.moveInput !== 0;
     const bob = walking ? Math.abs(Math.sin(h.walkPhase)) * 1.5 : 0;
     c.translate(0, -bob);
@@ -3459,6 +3544,11 @@ export class Engine {
 
     c.restore();
 
+    this.drawHeroTop(c, h, isActive, null);
+  }
+
+  /** Взмах, полоска HP, имя и вспышка урона — поверх любой модели (векторной или своей) */
+  private drawHeroTop(c: CanvasRenderingContext2D, h: Hero, isActive: boolean, sp: SpriteConfig | null) {
     // взмах ближнего боя
     if (h.swingT > 0) {
       const wdef = weaponById[h.weapon];
@@ -3481,29 +3571,32 @@ export class Engine {
       c.restore();
     }
 
-    // полоска HP + имя
+    // полоска HP + имя (для своей модели — над её макушкой)
+    const topY = sp ? sp.h + 14 : 86;
     const pct = h.hp / h.maxHp;
     const bw = 46;
     const tc = h.team === 0 ? "159,212,90" : "224,80,56";
     c.fillStyle = "rgba(8,10,16,0.85)";
-    c.fillRect(h.x - bw / 2 - 1, h.y - 86, bw + 2, 7);
+    c.fillRect(h.x - bw / 2 - 1, h.y - topY, bw + 2, 7);
     const hpc = pct > 0.5 ? (h.team === 0 ? "#8fce4f" : "#e06a4a") : pct > 0.25 ? "#e8c14a" : "#e05038";
     c.fillStyle = hpc;
-    c.fillRect(h.x - bw / 2, h.y - 85, bw * pct, 5);
+    c.fillRect(h.x - bw / 2, h.y - topY + 1, bw * pct, 5);
     c.strokeStyle = isActive ? "rgba(245,214,123,0.95)" : `rgba(${tc},0.6)`;
     c.lineWidth = 1;
-    c.strokeRect(h.x - bw / 2 - 1, h.y - 86, bw + 2, 7);
+    c.strokeRect(h.x - bw / 2 - 1, h.y - topY, bw + 2, 7);
     c.font = `${isActive ? "700" : "500"} 10.5px "Rubik", sans-serif`;
     c.textAlign = "center";
     c.fillStyle = isActive ? "#f5d67b" : h.team === 0 ? "rgba(207,232,168,0.85)" : "rgba(240,160,142,0.85)";
     c.strokeStyle = "rgba(8,10,16,0.9)";
     c.lineWidth = 2.5;
-    c.strokeText(h.name, h.x, h.y - 90);
-    c.fillText(h.name, h.x, h.y - 90);
+    c.strokeText(h.name, h.x, h.y - topY - 4);
+    c.fillText(h.name, h.x, h.y - topY - 4);
 
     if (h.flashT > 0) {
       c.fillStyle = `rgba(255,255,255,${h.flashT * 3.4})`;
-      c.beginPath(); c.ellipse(h.x, h.y - 32, 20, 36, 0, 0, Math.PI * 2); c.fill();
+      const fh = sp ? sp.h * 0.5 : 36;
+      const fw = sp ? Math.max(20, sp.w * 0.4) : 20;
+      c.beginPath(); c.ellipse(h.x, h.y - fh + (sp ? sp.offY : 4), fw, fh, 0, 0, Math.PI * 2); c.fill();
     }
   }
 

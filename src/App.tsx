@@ -4,6 +4,7 @@ import type { UISnapshot, Difficulty, MapId, BattleMode } from "./game/types";
 import MenuScreen from "./components/MenuScreen";
 import HUD from "./components/HUD";
 import ShopModal from "./components/ShopModal";
+import Workshop from "./components/Workshop";
 import { PauseOverlay, GameOverOverlay } from "./components/Overlays";
 
 export default function App() {
@@ -11,6 +12,7 @@ export default function App() {
   const engineRef = useRef<Engine | null>(null);
   const [snap, setSnap] = useState<UISnapshot | null>(null);
   const [shop, setShop] = useState(false);
+  const [workshop, setWorkshop] = useState(false);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -37,8 +39,13 @@ export default function App() {
               onClose={() => { setShop(false); engineRef.current?.setShopOpen(false); }}
             />
           )}
-          {snap.paused && !shop && snap.winner === null && (
-            <PauseOverlay snap={snap} engine={engineRef.current!} onMenu={() => engineRef.current?.toMenu()} />
+          {snap.paused && !shop && !workshop && snap.winner === null && (
+            <PauseOverlay
+              snap={snap}
+              engine={engineRef.current!}
+              onMenu={() => engineRef.current?.toMenu()}
+              onWorkshop={() => setWorkshop(true)}
+            />
           )}
           {snap.winner !== null && (
             <GameOverOverlay snap={snap} engine={engineRef.current!} onMenu={() => engineRef.current?.toMenu()} />
@@ -50,7 +57,11 @@ export default function App() {
           onStart={(d: Difficulty, m: MapId, mode: BattleMode) =>
             engineRef.current?.startGame(d, m, mode)
           }
+          onWorkshop={() => setWorkshop(true)}
         />
+      )}
+      {workshop && engineRef.current && (
+        <Workshop engine={engineRef.current} onClose={() => setWorkshop(false)} />
       )}
     </div>
   );

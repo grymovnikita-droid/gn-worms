@@ -10,7 +10,7 @@ const EMBERS = Array.from({ length: 16 }, (_, i) => ({
   drift: `${((i * 19) % 60) - 30}px`,
 }));
 
-export function PauseOverlay({ snap, engine, onMenu }: { snap: UISnapshot; engine: Engine; onMenu: () => void }) {
+export function PauseOverlay({ snap, engine, onMenu, onWorkshop }: { snap: UISnapshot; engine: Engine; onMenu: () => void; onWorkshop?: () => void }) {
   return (
     <div className="absolute inset-0 z-40 grid place-items-center bg-[#05070c]/74 anim-fade">
       <div className="panel-angled px-12 py-10 text-center anim-pop">
@@ -19,6 +19,7 @@ export function PauseOverlay({ snap, engine, onMenu }: { snap: UISnapshot; engin
         <div className="mt-7 flex flex-col gap-3 w-64 mx-auto">
           <button onClick={() => engine.togglePause()} className="btn-war px-6 py-3 text-xl">ПРОДОЛЖИТЬ</button>
           <button onClick={() => engine.startGame(snap.difficulty, snap.map, snap.mode)} className="btn-iron px-6 py-2.5 text-[15px]">БИТВА ЗАНОВО</button>
+          {onWorkshop && <button onClick={onWorkshop} className="btn-iron px-6 py-2.5 text-[15px]">МАСТЕРСКАЯ</button>}
           <button onClick={() => engine.toggleMute()} className="btn-iron px-6 py-2.5 text-[15px] inline-flex items-center justify-center gap-2.5">
             <SoundIcon muted={snap.muted} className="w-5 h-5" />
             ЗВУК: {snap.muted ? "ВЫКЛ" : "ВКЛ"}

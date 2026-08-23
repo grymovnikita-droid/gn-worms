@@ -114,7 +114,7 @@ function MapCard({ id, selected, onPick }: { id: MapId; selected: boolean; onPic
   );
 }
 
-export default function MenuScreen({ onStart }: { onStart: (d: Difficulty, m: MapId, mode: BattleMode) => void }) {
+export default function MenuScreen({ onStart, onWorkshop }: { onStart: (d: Difficulty, m: MapId, mode: BattleMode) => void; onWorkshop: () => void }) {
   const [diff, setDiff] = useState<Difficulty>(1);
   const [mapId, setMapId] = useState<MapId>("canyon");
   const [mode, setMode] = useState<BattleMode>(4);
@@ -219,10 +219,18 @@ export default function MenuScreen({ onStart }: { onStart: (d: Difficulty, m: Ma
               </div>
             </div>
 
-            <button onClick={() => onStart(diff, mapId, mode)} className="btn-war anim-goldpulse mt-6 px-14 py-4 text-[24px] inline-flex items-center gap-4">
-              <SwordIcon className="w-6 h-6" />
-              В БОЙ
-            </button>
+            <div className="mt-6 flex items-center gap-3 flex-wrap">
+              <button onClick={() => onStart(diff, mapId, mode)} className="btn-war anim-goldpulse px-14 py-4 text-[24px] inline-flex items-center gap-4">
+                <SwordIcon className="w-6 h-6" />
+                В БОЙ
+              </button>
+              <button onClick={onWorkshop} className="btn-iron px-6 py-4 text-[15px] inline-flex items-center gap-2.5" title="Заменить модели героев, подарки и фон на свои картинки">
+                <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.4 2.4-2.8-2.8 2.4-2.4z" />
+                </svg>
+                МАСТЕРСКАЯ
+              </button>
+            </div>
             <div className="mt-3 flex items-center gap-2 text-[13.5px] text-[#7a86a0]">
               <SkullIcon className="w-4 h-4 text-[#e05038]" />
               Рассвет ходит первым · на кону — всё золото королевства
