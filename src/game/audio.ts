@@ -194,47 +194,55 @@ class Sfx {
   gasp() { this.ensure(); this.noise(0.3, 0.06, 460, 0.8, 0, 190, "bandpass"); }
 
   // ============================================================
-  // Фоновая музыка в духе Dota 2: тёмный эмбиент, дроун,
-  // минорные пэды, боевые барабаны и редкие валторны
+  // Фоновая музыка: задорный боевой фолк-рок
+  // Am → C → F → G, 138 BPM, драйвовый бас, бочка/хэт, мелодия
   // ============================================================
   private musicGain: GainNode | null = null;
   private musicTimer: number | null = null;
   private musicStep = 0;
   private musicNextT = 0;
+  private readonly BPM = 138;
+
+  // бас: driving-восьмые по тактам Am / C / F / G
+  private readonly BASS: number[] = [
+    110, 110, 110, 110, 110, 110, 164.81, 110,
+    130.81, 130.81, 130.81, 130.81, 130.81, 130.81, 196, 130.81,
+    87.31, 87.31, 87.31, 87.31, 87.31, 87.31, 130.81, 87.31,
+    98, 98, 98, 98, 98, 98, 146.83, 196,
+  ];
+  // мелодия (0 = пауза)
+  private readonly MELODY: number[] = [
+    659.25, 0, 587.33, 659.25, 0, 523.25, 440, 523.25,
+    587.33, 0, 659.25, 587.33, 0, 523.25, 493.88, 0,
+    440, 0, 523.25, 659.25, 0, 783.99, 659.25, 0,
+    587.33, 523.25, 493.88, 523.25, 587.33, 0, 493.88, 0,
+  ];
+  // аккорды-стабы на слабые доли
+  private readonly CHORDS: number[][] = [
+    [220, 261.63, 329.63],
+    [261.63, 329.63, 392],
+    [174.61, 220, 261.63],
+    [196, 246.94, 293.66],
+  ];
 
   startMusic() {
     this.ensure();
     if (!this.ctx || !this.master || this.musicTimer !== null) return;
     this.musicGain = this.ctx.createGain();
-    this.musicGain.gain.value = 0.17;
+    this.musicGain.gain.value = 0.42;
     this.musicGain.connect(this.master);
-
-    // вечный низкий дроун
-    const dg = this.ctx.createGain();
-    dg.gain.value = 0.34;
-    const lp = this.ctx.createBiquadFilter();
-    lp.type = "lowpass";
-    lp.frequency.value = 210;
-    for (const [f, det] of [[55, 0], [82.41, 4], [110, -3]] as [number, number][]) {
-      const o = this.ctx.createOscillator();
-      o.type = "sawtooth";
-      o.frequency.value = f;
-      o.detune.value = det;
-      o.connect(lp);
-      o.start();
-    }
-    lp.connect(dg).connect(this.musicGain);
-
-    this.musicNextT = this.ctx.currentTime + 0.15;
-    this.musicTimer = window.setInterval(() => this.scheduleMusic(), 140);
+    this.musicNextT = this.ctx.currentTime + 0.1;
+    this.musicStep = 0;
+    this.musicTimer = window.setInterval(() => this.scheduleMusic(), 25);
   }
 
   private scheduleMusic() {
     if (!this.ctx || !this.musicGain) return;
-    while (this.musicNextT < this.ctx.currentTime + 0.7) {
-      this.playBar(this.musicNextT, this.musicStep);
-      this.musicStep++;
-      this.musicNextT += 4.8; // такт
+    const stepDur = 60 / this.BPM / 2; // восьмая нота
+    while (this.musicNextT < this.ctx.currentTime + 0.16) {
+      this.playStep(this.musicStep, this.musicNextT, stepDur);
+      this.musicStep = (this.musicStep + 1) % 32;
+      this.musicNextT += stepDur;
     }
   }
 
@@ -271,41 +279,41 @@ class Sfx {
     src.stop(at + dur + 0.1);
   }
 
-  private playBar(t0: number, step: number) {
-    // минорная прогрессия: Am → F → Dm → E
-    const chords = [
-      [110, 164.81, 220],
-      [87.31, 130.81, 174.61],
-      [73.42, 110, 146.83],
-      [82.41, 123.47, 164.81],
-    ];
-    const chord = chords[step % 4];
-    for (const f of chord) {
-      this.mTone(f, 4.6, "triangle", 0.105, t0, undefined, 1.1);
-      this.mTone(f * 2.003, 4.4, "sine", 0.035, t0, undefined, 1.4);
+  private playStep(s: number, t: number, dur: number) {
+    const bar = Math.floor(s / 8);
+    // бочка — «четыре на пол»
+    if (s % 4 === 0) {
+      this.mTone(150, 0.12, "sine", 0.5, t, 42, 0.004);
+      this.mTone(64, 0.16, "sine", 0.3, t, 40, 0.004);
     }
-    // боевые барабаны: доли 1 и 3
-    this.warDrum(t0, 1);
-    this.warDrum(t0 + 2.4, 0.72);
-    if (step % 4 === 3) {
-      // сбивка в конце круга
-      this.warDrum(t0 + 3.6, 0.9);
-      this.mNoise(0.5, 0.1, 3400, t0 + 3.6, "highpass", 900);
+    // рабочий на 2 и 4
+    if (s % 8 === 4) {
+      this.mNoise(0.1, 0.26, 1800, t, "bandpass");
+      this.mTone(196, 0.08, "triangle", 0.18, t, 130);
     }
-    // редкая валторна
-    if (step % 2 === 1 && Math.random() < 0.6) {
-      const notes = [220, 246.94, 293.66, 329.63];
-      const f = notes[Math.floor(Math.random() * notes.length)];
-      const bp = 0.045;
-      this.mTone(f, 3.4, "sawtooth", bp, t0 + 0.6, f * 1.01, 0.9);
-      this.mTone(f * 0.5, 3.4, "triangle", bp * 0.8, t0 + 0.6, undefined, 0.9);
+    // хэт на сильные, шейкер на слабые
+    if (s % 2 === 0) this.mNoise(0.035, s % 4 === 2 ? 0.13 : 0.07, 8200, t, "highpass");
+    else this.mNoise(0.025, 0.045, 9600, t, "highpass");
+    // сбивка в конце круга
+    if (s === 30) {
+      this.mNoise(0.06, 0.2, 2400, t, "bandpass");
+      this.mNoise(0.06, 0.24, 2600, t + dur / 2, "bandpass");
     }
-  }
-
-  private warDrum(at: number, vol: number) {
-    this.mTone(96, 0.5, "sine", 0.5 * vol, at, 36);
-    this.mTone(190, 0.12, "sine", 0.16 * vol, at, 70);
-    this.mNoise(0.16, 0.22 * vol, 900, at, "lowpass", 180);
+    // бас: драйвовые восьмые + октавный «щипок»
+    const b = this.BASS[s];
+    this.mTone(b, dur * 0.82, "triangle", 0.3, t);
+    if (s % 2 === 0) this.mTone(b * 2, dur * 0.3, "square", 0.05, t);
+    // аккорд-стаб
+    if (s % 2 === 1 && s % 8 !== 7) {
+      for (const f of this.CHORDS[bar]) this.mTone(f, 0.13, "sawtooth", 0.045, t);
+    }
+    // мелодия с детюном и эхом
+    const m = this.MELODY[s];
+    if (m > 0) {
+      this.mTone(m, dur * 0.95, "square", 0.105, t);
+      this.mTone(m * 1.006, dur * 0.95, "square", 0.05, t);
+      this.mTone(m, 0.11, "square", 0.032, t + 0.17);
+    }
   }
 }
 
