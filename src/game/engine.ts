@@ -39,6 +39,7 @@ interface Proj {
   ox: number; oy: number;
   shooter: Hero | null;
   wet?: boolean;
+  pierce?: number;
 }
 interface Crate { x: number; y: number; vy: number; landed: boolean; kind: "gold" | "heal"; }
 interface Particle {
@@ -47,7 +48,7 @@ interface Particle {
   grav: number; kind: "spark" | "smoke" | "glow" | "coin" | "chunk" | "heal" | "ring" | "tele";
 }
 interface DmgNum { x: number; y: number; life: number; text: string; color: string; size: number; }
-interface AiState { stage: "think" | "move" | "aim" | "done"; t: number; dur: number; dir: number; angle: number; speed: number; }
+interface AiState { stage: "think" | "move" | "aim" | "done"; t: number; dur: number; dir: number; angle: number; speed: number; beam?: boolean; }
 interface Ember { x: number; y: number; vy: number; drift: number; size: number; phase: number; }
 interface Fire { x: number; y: number; r: number; t: number; dur: number; next: number; team: Team; }
 interface Beam { x1: number; y1: number; x2: number; y2: number; t: number; }
@@ -108,7 +109,6 @@ export class Engine {
   private waterY = 668;
   private map: MapId = "canyon";
   private dripT = 0;
-  private geyserT = 2;
   private vines: { x: number; len: number; ph: number }[] = [];
   private firePillars: number[] = [];
   private hellSpikes: Spike[] = [];
@@ -352,6 +352,7 @@ export class Engine {
   // ================= ПУБЛИЧНОЕ API =================
   startGame(diff: Difficulty, map: MapId = "canyon", mode: BattleMode = 4) {
     sfx.ensure();
+    sfx.startMusic();
     this.difficulty = diff;
     this.map = map;
     this.mode = mode;
@@ -722,6 +723,22 @@ export class Engine {
     this.terrainDirty = true;
   }
 
+  // сглаживание краёв кратера — воронка становится чашей, а не колодцем с отвесными стенами
+  private smoothCrater(a: number, b: number) {
+    const x0 = clamp(Math.floor(a), 2, WORLD_W - 3);
+    const x1 = clamp(Math.ceil(b), 2, WORLD_W - 3);
+    if (x1 <= x0) return;
+    for (let pass = 0; pass < 2; pass++) {
+      for (let x = x0; x <= x1; x++) {
+        if (this.heights[x] > WORLD_H) continue; // дыры до лавы не трогаем
+        const prev = this.heights[x - 2] > WORLD_H ? this.heights[x] : this.heights[x - 2];
+        const next = this.heights[x + 2] > WORLD_H ? this.heights[x] : this.heights[x + 2];
+        this.heights[x] = (prev + this.heights[x] * 2 + next) / 4;
+      }
+    }
+    this.terrainDirty = true;
+  }
+
   private renderTerrainImage() {
     const c = this.terrainCanvas.getContext("2d")!;
     const H = WORLD_H, half = WORLD_W / 2;
@@ -1058,8 +1075,13 @@ export class Engine {
 
     const y0 = h.y - HERO_CY;
     const err = AI_ERR[this.difficulty] * rand(-1, 1);
+    const useBeam = sigDef.kind === "beam" && hasAmmo(h.sig) && Math.random() < 0.45;
     let angle: number, speed: number;
-    if (def.gravMul < 0.5) {
+    if (useBeam) {
+      // луч бьёт по прямой
+      angle = Math.atan2(ty - y0, tx - h.x);
+      speed = 0;
+    } else if (def.gravMul < 0.5) {
       angle = Math.atan2(ty - y0, tx - h.x);
       speed = AI_SHOT_SPEED * def.speedMul * 0.96;
     } else {
@@ -1067,13 +1089,13 @@ export class Engine {
       angle = shot.angle;
       speed = shot.speed;
     }
-    angle += err;
+    angle += err * (useBeam ? 0.3 : 1);
     speed *= 1 + rand(-0.04, 0.04);
 
     this.ai = {
       stage: "think", t: 0, dur: 0.7,
       dir: Math.random() < 0.45 ? (Math.random() < 0.5 ? -1 : 1) : 0,
-      angle, speed,
+      angle, speed, beam: useBeam,
     };
     if (h.mek > 0 && h.hp < h.maxHp - 40) {
       h.mek--; h.hp = Math.min(h.maxHp, h.hp + 45);
@@ -1116,7 +1138,14 @@ export class Engine {
       this.aimAngle = this.ai.angle;
       if (this.ai.t >= this.ai.dur) {
         this.ai.stage = "done";
-        this.launchProjectile(h, this.ai.angle, this.ai.speed);
+        if (this.ai.beam) {
+          h.weapon = h.sig;
+          const sd = weaponById[h.sig];
+          if (sd.ammo !== -1) h.ammo[h.sig] = (h.ammo[h.sig] ?? 0) - 1;
+          this.doBeam(h, sd);
+        } else {
+          this.launchProjectile(h, this.ai.angle, this.ai.speed);
+        }
       }
     }
   }
@@ -1242,6 +1271,7 @@ export class Engine {
     }
     for (let s2 = 0; s2 <= dist; s2 += 9) this.carve(x0 + dx * s2, y0 + dy * s2, 8);
     for (let s2 = 0; s2 <= dist; s2 += 60) this.smashDecor(x0 + dx * s2, y0 + dy * s2, 16);
+    this.smoothCrater(Math.min(x0, x1) - 16, Math.max(x0, x1) + 16);
     const mul = h.items.has("aghs") ? 1.45 : 1;
     for (const t of this.heroes) {
       if (!t.alive) continue;
@@ -1280,6 +1310,7 @@ export class Engine {
     for (let i = this.projs.length - 1; i >= 0; i--) {
       const p = this.projs[i];
       const def = p.def;
+      const px0 = p.x, py0 = p.y;
       p.vy += GRAVITY * def.gravMul * dt;
       p.vx += this.wind * def.windMul * dt;
       p.x += p.vx * dt;
@@ -1329,6 +1360,21 @@ export class Engine {
           }
           sfx.land();
           this.projs.splice(i, 1); continue;
+        } else if (def.kind === "pierce") {
+          // пробивает грунт, оставляя канал вдоль траектории
+          p.pierce = (p.pierce ?? 0) + 1;
+          const dist = Math.hypot(p.x - px0, p.y - py0);
+          const steps = Math.max(1, Math.ceil(dist / 13));
+          for (let k = 0; k <= steps; k++) {
+            const t = k / steps;
+            this.carve(px0 + (p.x - px0) * t, py0 + (p.y - py0) * t, 10);
+          }
+          this.smashDecor(p.x, p.y, 14);
+          for (let k = 0; k < 5; k++) {
+            this.particles.push({ x: p.x, y: sy - 3, vx: rand(-90, 90), vy: -rand(30, 160), life: 0.35, max: 0.35, size: rand(1.5, 2.6), color: "#d8b48e", grav: 500, kind: "spark" });
+          }
+          p.vx *= 0.7; p.vy *= 0.7;
+          if ((p.pierce ?? 0) > 6 || Math.hypot(p.vx, p.vy) < 240) { this.projs.splice(i, 1); continue; }
         } else { this.explodeProj(i); continue; }
       }
 
@@ -1387,6 +1433,13 @@ export class Engine {
     opts?: { endTurn?: boolean; quiet?: boolean }
   ) {
     this.carve(x, y, r);
+    // если снаряд закопался глубоко — вскрыть поверхность широким кратером,
+    // чтобы не оставалось узких «вертикальных колодцев»
+    const sy0 = this.surface(clamp(x, 0, WORLD_W - 1));
+    if (r > 12 && sy0 < WORLD_H && y > sy0 + r * 0.2) {
+      this.carve(x, sy0 + r * 0.32, r * 0.96);
+    }
+    this.smoothCrater(x - r - 10, x + r + 10);
     this.shake = Math.min(26, this.shake + r * 0.18);
     sfx.explode(r > 90);
     if (r > 55) this.whiteFlash = Math.min(1, this.whiteFlash + 0.5);
@@ -1720,17 +1773,6 @@ export class Engine {
     }
 
     // гейзеры лавы
-    this.geyserT -= dt;
-    if (this.geyserT <= 0) {
-      this.geyserT = rand(2, 4.5);
-      const gx = rand(200, WORLD_W - 200);
-      sfx.splash();
-      for (let i = 0; i < 20; i++) {
-        this.particles.push({ x: gx + rand(-10, 10), y: LAVA_TOP, vx: rand(-50, 50), vy: -rand(120, 430), life: rand(0.5, 1), max: 1, size: rand(1.8, 3.6), color: ["#ffd66b", "#ff8c2a", "#ffe9a0"][Math.floor(rand(0, 3))], grav: 400, kind: "spark" });
-      }
-      this.particles.push({ x: gx, y: LAVA_TOP - 4, vx: 0, vy: 0, life: 0.25, max: 0.25, size: 40, color: "#ffd66b", grav: 0, kind: "glow" });
-    }
-
     if (this.winner !== null) return;
 
     // очаги напалма

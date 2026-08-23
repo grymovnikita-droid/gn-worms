@@ -192,6 +192,121 @@ class Sfx {
   }
 
   gasp() { this.ensure(); this.noise(0.3, 0.06, 460, 0.8, 0, 190, "bandpass"); }
+
+  // ============================================================
+  // Фоновая музыка в духе Dota 2: тёмный эмбиент, дроун,
+  // минорные пэды, боевые барабаны и редкие валторны
+  // ============================================================
+  private musicGain: GainNode | null = null;
+  private musicTimer: number | null = null;
+  private musicStep = 0;
+  private musicNextT = 0;
+
+  startMusic() {
+    this.ensure();
+    if (!this.ctx || !this.master || this.musicTimer !== null) return;
+    this.musicGain = this.ctx.createGain();
+    this.musicGain.gain.value = 0.17;
+    this.musicGain.connect(this.master);
+
+    // вечный низкий дроун
+    const dg = this.ctx.createGain();
+    dg.gain.value = 0.34;
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = 210;
+    for (const [f, det] of [[55, 0], [82.41, 4], [110, -3]] as [number, number][]) {
+      const o = this.ctx.createOscillator();
+      o.type = "sawtooth";
+      o.frequency.value = f;
+      o.detune.value = det;
+      o.connect(lp);
+      o.start();
+    }
+    lp.connect(dg).connect(this.musicGain);
+
+    this.musicNextT = this.ctx.currentTime + 0.15;
+    this.musicTimer = window.setInterval(() => this.scheduleMusic(), 140);
+  }
+
+  private scheduleMusic() {
+    if (!this.ctx || !this.musicGain) return;
+    while (this.musicNextT < this.ctx.currentTime + 0.7) {
+      this.playBar(this.musicNextT, this.musicStep);
+      this.musicStep++;
+      this.musicNextT += 4.8; // такт
+    }
+  }
+
+  private mTone(freq: number, dur: number, type: OscillatorType, vol: number, at: number, slideTo?: number, attack = 0.02) {
+    if (!this.ctx || !this.musicGain) return;
+    const o = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(Math.max(20, freq), at);
+    if (slideTo !== undefined) o.frequency.exponentialRampToValueAtTime(Math.max(20, slideTo), at + dur);
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.001, vol), at + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    o.connect(g).connect(this.musicGain);
+    o.start(at);
+    o.stop(at + dur + 0.1);
+  }
+
+  private mNoise(dur: number, vol: number, freq: number, at: number, kind: BiquadFilterType = "lowpass", slideTo?: number) {
+    if (!this.ctx || !this.musicGain || !this.noiseBuf) return;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    src.loop = true;
+    const f = this.ctx.createBiquadFilter();
+    f.type = kind;
+    f.frequency.setValueAtTime(freq, at);
+    if (slideTo !== undefined) f.frequency.exponentialRampToValueAtTime(Math.max(40, slideTo), at + dur);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.001, vol), at + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    src.connect(f).connect(g).connect(this.musicGain);
+    src.start(at);
+    src.stop(at + dur + 0.1);
+  }
+
+  private playBar(t0: number, step: number) {
+    // минорная прогрессия: Am → F → Dm → E
+    const chords = [
+      [110, 164.81, 220],
+      [87.31, 130.81, 174.61],
+      [73.42, 110, 146.83],
+      [82.41, 123.47, 164.81],
+    ];
+    const chord = chords[step % 4];
+    for (const f of chord) {
+      this.mTone(f, 4.6, "triangle", 0.105, t0, undefined, 1.1);
+      this.mTone(f * 2.003, 4.4, "sine", 0.035, t0, undefined, 1.4);
+    }
+    // боевые барабаны: доли 1 и 3
+    this.warDrum(t0, 1);
+    this.warDrum(t0 + 2.4, 0.72);
+    if (step % 4 === 3) {
+      // сбивка в конце круга
+      this.warDrum(t0 + 3.6, 0.9);
+      this.mNoise(0.5, 0.1, 3400, t0 + 3.6, "highpass", 900);
+    }
+    // редкая валторна
+    if (step % 2 === 1 && Math.random() < 0.6) {
+      const notes = [220, 246.94, 293.66, 329.63];
+      const f = notes[Math.floor(Math.random() * notes.length)];
+      const bp = 0.045;
+      this.mTone(f, 3.4, "sawtooth", bp, t0 + 0.6, f * 1.01, 0.9);
+      this.mTone(f * 0.5, 3.4, "triangle", bp * 0.8, t0 + 0.6, undefined, 0.9);
+    }
+  }
+
+  private warDrum(at: number, vol: number) {
+    this.mTone(96, 0.5, "sine", 0.5 * vol, at, 36);
+    this.mTone(190, 0.12, "sine", 0.16 * vol, at, 70);
+    this.mNoise(0.16, 0.22 * vol, 900, at, "lowpass", 180);
+  }
 }
 
 export const sfx = new Sfx();
