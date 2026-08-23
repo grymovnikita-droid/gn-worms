@@ -112,6 +112,10 @@ export class Engine {
 
   // плот
   private raft = { x: WORLD_W / 2, dir: 1, dx: 0, half: 36 };
+  // непрерывная область озера (вода растекается от центра): [lakeL, lakeR]
+  private lakeL = 0;
+  private lakeR = 0;
+  private hasLake = false;
 
   // состояние игры
   screen: Screen = "menu";
@@ -609,10 +613,24 @@ export class Engine {
     return this.heights[clamp(Math.round(x), 0, WORLD_W - 1)];
   }
 
+  // пересчёт непрерывной области озера (вода растекается от центра, кратеры затапливаются)
+  private updateLakeBounds() {
+    const level = this.waterY;
+    const cx = Math.round(WORLD_W / 2);
+    if (this.heights[cx] <= level) { this.hasLake = false; return; }
+    let sa = cx, sb = cx;
+    while (sa > 1 && this.heights[sa - 1] > level) sa--;
+    while (sb < WORLD_W - 2 && this.heights[sb + 1] > level) sb++;
+    this.lakeL = sa;
+    this.lakeR = sb;
+    this.hasLake = true;
+  }
+
   private waterLevelAt(x: number): number | null {
-    const cx = WORLD_W / 2;
-    if (Math.abs(x - cx) > LAKE_HALF) return null;
-    const sy = this.surface(x);
+    if (!this.hasLake) return null;
+    const xi = Math.round(x);
+    if (xi < this.lakeL || xi > this.lakeR) return null;
+    const sy = this.surface(xi);
     return sy > this.waterY ? this.waterY : null;
   }
 
@@ -1482,6 +1500,7 @@ export class Engine {
 
   // ================= UPDATE =================
   private update(dt: number) {
+    this.updateLakeBounds(); // вода всегда следует за рельефом (кратеры, взрывы)
     for (const e of this.embers) {
       e.y -= e.vy * dt;
       e.x += Math.sin(this.time * 0.7 + e.phase) * e.drift * dt;
@@ -1590,7 +1609,7 @@ export class Engine {
       h.swingT = Math.max(0, h.swingT - dt);
       const sy = this.surface(h.x);
       const isActive = h === this.cur() && (this.phase === "aim" || this.phase === "ai");
-      const inLake = sy > this.waterY + 8;
+      const inLake = this.hasLake && h.x >= this.lakeL && h.x <= this.lakeR && sy > this.waterY + 8;
 
       if (inLake && Math.abs(h.x - this.raft.x) <= this.raft.half + 7 && !h.onGround && h.vy > 0 && h.y >= deckY - 12) {
         // приземление на плот
@@ -2202,60 +2221,57 @@ export class Engine {
   }
 
   // вода: одно большое озеро в центре
+  // Вода с физикой: заполняет только непрерывную область озера (растекается от центра)
+  // и повторяет рельеф дна, затапливая выбитые кратеры. Отдельные "висящие" лужи не рисуются.
   private drawWater(c: CanvasRenderingContext2D) {
+    if (!this.hasLake) return;
     const frozen = this.map === "frost";
-    const x0 = WORLD_W / 2 - LAKE_HALF, x1 = WORLD_W / 2 + LAKE_HALF;
-    const a = Math.max(0, x0), b = Math.min(WORLD_W, x1);
     const level = this.waterY;
-    const segs: [number, number][] = [];
-    let s0 = -1;
-    for (let x = a; x <= b; x++) {
-      const sy = x < WORLD_W ? this.heights[x] : 9999;
-      if (sy > level) { if (s0 < 0) s0 = x; }
-      else if (s0 >= 0) { segs.push([s0, x - 1]); s0 = -1; }
-    }
-    if (s0 >= 0) segs.push([s0, b]);
-    if (!segs.length) return;
-
+    const sa = this.lakeL, sb = this.lakeR;
+    // глубина воды ограничена лавой, чтобы не красить столб до самого низа мира
+    const cap = LAVA_TOP + 24;
+    const bot = (x: number) => Math.min(this.heights[clamp(Math.round(x), 0, WORLD_W - 1)], cap);
     const wave = (x: number) => level + Math.sin(x * 0.06 + this.time * 1.6) * 1.3 + Math.sin(x * 0.023 - this.time * 1.1) * 0.8;
 
-    for (const [sa, sb] of segs) {
-      const g = c.createLinearGradient(0, level, 0, level + 110);
-      if (frozen) {
-        g.addColorStop(0, "rgba(200,235,252,0.92)");
-        g.addColorStop(0.35, "rgba(130,190,228,0.75)");
-        g.addColorStop(1, "rgba(40,90,145,0.6)");
-      } else {
-        g.addColorStop(0, "rgba(95,185,240,0.9)");
-        g.addColorStop(0.4, "rgba(45,120,190,0.8)");
-        g.addColorStop(1, "rgba(12,45,100,0.78)");
-      }
-      c.fillStyle = g;
-      c.beginPath();
-      c.moveTo(sa, this.heights[sa]);
-      for (let x = sa; x <= sb; x += 3) c.lineTo(x, frozen ? level : wave(x));
-      c.lineTo(sb, this.heights[sb]);
-      c.closePath();
-      c.fill();
+    // тело воды: верх — волнистая поверхность, низ — рельеф дна (кратеры затапливаются)
+    const g = c.createLinearGradient(0, level, 0, level + 120);
+    if (frozen) {
+      g.addColorStop(0, "rgba(200,235,252,0.92)");
+      g.addColorStop(0.35, "rgba(130,190,228,0.75)");
+      g.addColorStop(1, "rgba(40,90,145,0.6)");
+    } else {
+      g.addColorStop(0, "rgba(95,185,240,0.9)");
+      g.addColorStop(0.4, "rgba(45,120,190,0.8)");
+      g.addColorStop(1, "rgba(12,45,100,0.78)");
+    }
+    c.fillStyle = g;
+    c.beginPath();
+    c.moveTo(sa, bot(sa));
+    for (let x = sa; x <= sb; x += 3) c.lineTo(x, frozen ? level : wave(x));
+    c.lineTo(sb, frozen ? level : wave(sb));
+    c.lineTo(sb, bot(sb));
+    for (let x = sb; x >= sa; x -= 3) c.lineTo(x, bot(x));
+    c.closePath();
+    c.fill();
 
-      c.strokeStyle = frozen ? "rgba(255,255,255,0.92)" : "rgba(190,232,255,0.9)";
-      c.lineWidth = frozen ? 2.6 : 1.8;
-      c.beginPath();
-      for (let x = sa, first = true; x <= sb; x += 3) {
-        const y = frozen ? level : wave(x);
-        if (first) { c.moveTo(x, y); first = false; } else c.lineTo(x, y);
-      }
-      c.stroke();
+    // линия поверхности
+    c.strokeStyle = frozen ? "rgba(255,255,255,0.92)" : "rgba(190,232,255,0.9)";
+    c.lineWidth = frozen ? 2.6 : 1.8;
+    c.beginPath();
+    for (let x = sa, first = true; x <= sb; x += 3) {
+      const y = frozen ? level : wave(x);
+      if (first) { c.moveTo(x, y); first = false; } else c.lineTo(x, y);
+    }
+    c.stroke();
 
-      // береговая пена
-      c.fillStyle = frozen ? "rgba(240,252,255,0.85)" : "rgba(215,240,255,0.8)";
-      for (const edge of [sa, sb]) {
-        const ey = this.heights[clamp(edge, 0, WORLD_W - 1)];
-        if (Math.abs(ey - level) < 30) {
-          for (let i = 0; i < 3; i++) {
-            const bx = edge + (edge === sa ? -1 : 1) * (2 + i * 3.4) + Math.sin(this.time * 2.6 + i) * 1.6;
-            c.beginPath(); c.arc(bx, Math.min(ey, level + 3), 2.6 - i * 0.6, 0, Math.PI * 2); c.fill();
-          }
+    // береговая пена на краях воды
+    c.fillStyle = frozen ? "rgba(240,252,255,0.85)" : "rgba(215,240,255,0.8)";
+    for (const edge of [sa, sb]) {
+      const ey = this.heights[clamp(edge, 0, WORLD_W - 1)];
+      if (Math.abs(ey - level) < 34) {
+        for (let i = 0; i < 3; i++) {
+          const bx = edge + (edge === sa ? -1 : 1) * (2 + i * 3.4) + Math.sin(this.time * 2.6 + i) * 1.6;
+          c.beginPath(); c.arc(bx, Math.min(ey, level + 3), 2.6 - i * 0.6, 0, Math.PI * 2); c.fill();
         }
       }
     }
@@ -2264,7 +2280,7 @@ export class Engine {
       c.strokeStyle = "rgba(235,250,255,0.4)";
       c.lineWidth = 1;
       for (let i = 0; i < 8; i++) {
-        const cx2 = x0 + 30 + i * ((x1 - x0) / 8);
+        const cx2 = sa + (i + 0.5) * ((sb - sa) / 8);
         if (this.surface(cx2) <= level) continue;
         c.beginPath();
         c.moveTo(cx2, level + 3); c.lineTo(cx2 + 9, level + 11); c.lineTo(cx2 + 4, level + 20);
@@ -2272,9 +2288,9 @@ export class Engine {
       }
     } else {
       c.fillStyle = "rgba(215,242,255,0.5)";
-      const w = x1 - x0;
+      const w = Math.max(1, sb - sa);
       for (let i = 0; i < 7; i++) {
-        const gx = x0 + ((this.time * 30 + i * (w / 7) * 1.6) % w);
+        const gx = sa + ((this.time * 30 + i * (w / 7) * 1.6) % w);
         if (this.surface(gx) > level) {
           c.fillRect(gx, level + 4 + Math.sin(this.time * 2 + i) * 1.6, 13, 1.5);
         }
