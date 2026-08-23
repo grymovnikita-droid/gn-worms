@@ -648,6 +648,45 @@ export class Engine {
     return this.heights[clamp(Math.round(x), 0, WORLD_W - 1)];
   }
 
+  // разрушение декораций в точке (x, y) радиусом r: деревья, шипы, сталактиты, лианы
+  private smashDecor(x: number, y: number, r: number) {
+    for (const t of this.trees) {
+      if (t.alive && Math.hypot(t.x - x, t.baseY - 40 - y) < r + 34) {
+        t.alive = false;
+        for (let k = 0; k < 14; k++) {
+          this.particles.push({ x: t.x + rand(-18, 18), y: t.baseY - rand(8, 80), vx: rand(-110, 110), vy: rand(-220, -30), life: rand(0.5, 1.1), max: 1.1, size: rand(2, 5), color: this.map === "jungle" ? "#2e7a3a" : this.map === "inferno" ? "#2a1a16" : t.side === 0 ? "#3f8a42" : "#4a2a24", grav: 520, kind: "chunk" });
+        }
+      }
+    }
+    const smashSpikes = (arr: Spike[]) => {
+      for (let i = arr.length - 1; i >= 0; i--) {
+        const s = arr[i];
+        const sy = this.surface(s.x);
+        if (Math.hypot(s.x - x, sy - s.len / 2 - y) < r + 12) {
+          for (let k = 0; k < 6; k++) {
+            this.particles.push({ x: s.x + rand(-6, 6), y: sy - rand(0, s.len), vx: rand(-140, 140), vy: rand(-260, -40), life: rand(0.4, 0.8), max: 0.8, size: rand(1.6, 3.2), color: "#c8ccd4", grav: 600, kind: "chunk" });
+          }
+          arr.splice(i, 1);
+        }
+      }
+    };
+    smashSpikes(this.stalagmites);
+    smashSpikes(this.hellSpikes);
+    for (let i = this.stalactites.length - 1; i >= 0; i--) {
+      const s = this.stalactites[i];
+      if (Math.hypot(s.x - x, s.len / 2 - y) < r + 12) {
+        for (let k = 0; k < 6; k++) {
+          this.particles.push({ x: s.x + rand(-6, 6), y: rand(4, s.len), vx: rand(-120, 120), vy: rand(40, 240), life: rand(0.4, 0.8), max: 0.8, size: rand(1.6, 3.2), color: "#cfe8f6", grav: 600, kind: "chunk" });
+        }
+        this.stalactites.splice(i, 1);
+      }
+    }
+    for (let i = this.vines.length - 1; i >= 0; i--) {
+      const v = this.vines[i];
+      if (Math.abs(v.x - x) < r + 10 && y < v.len + 10) this.vines.splice(i, 1);
+    }
+  }
+
   // пересчёт непрерывной области озера (вода растекается от центра, кратеры затапливаются)
   private updateLakeBounds() {
     const level = this.waterY;
@@ -1175,6 +1214,7 @@ export class Engine {
     }
     const sx = h.x + dx * (def.range ?? 60) * 0.6;
     this.carve(sx, this.surface(sx) + 2, 13);
+    this.smashDecor(sx, this.surface(sx), 22);
     if (hit) sfx.hurt();
     this.phase = "settle";
     this.settleT = 0.05;
@@ -1201,6 +1241,7 @@ export class Engine {
       if (y1 >= this.surface(x1) + 2) break;
     }
     for (let s2 = 0; s2 <= dist; s2 += 9) this.carve(x0 + dx * s2, y0 + dy * s2, 8);
+    for (let s2 = 0; s2 <= dist; s2 += 60) this.smashDecor(x0 + dx * s2, y0 + dy * s2, 16);
     const mul = h.items.has("aghs") ? 1.45 : 1;
     for (const t of this.heroes) {
       if (!t.alive) continue;
@@ -1351,6 +1392,8 @@ export class Engine {
     if (r > 55) this.whiteFlash = Math.min(1, this.whiteFlash + 0.5);
     this.decals.push({ x, y: this.surface(clamp(x, 0, WORLD_W - 1)), r, life: 26, max: 26 });
     if (this.decals.length > 40) this.decals.shift();
+
+    this.smashDecor(x, y, r);
 
     const frost = this.map === "frost" && def?.kind !== "napalm";
     const icy = def?.ice || frost;
@@ -1656,7 +1699,7 @@ export class Engine {
       if (this.decals[i].life <= 0) this.decals.splice(i, 1);
     }
     for (const t of this.trees) {
-      if (t.alive && this.surface(t.x) > t.baseY + 46) {
+      if (t.alive && this.surface(t.x) > t.baseY + 26) {
         t.alive = false;
         sfx.land();
         for (let k = 0; k < 10; k++) {
@@ -1819,6 +1862,10 @@ export class Engine {
         const cwl = this.waterLevelAt(c.x);
         if (cwl !== null && c.y > cwl) { this.waterSplash(c.x); this.crates.splice(i, 1); continue; }
         if (c.y > LAVA_TOP) { this.lavaSplash(c.x); this.crates.splice(i, 1); }
+      } else {
+        // если землю под ящиком выбили — он падает снова
+        const sy = this.surface(c.x);
+        if (sy >= WORLD_H || sy - 10 > c.y + 14) { c.landed = false; c.vy = 0; }
       }
     }
 
