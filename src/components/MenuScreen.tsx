@@ -11,8 +11,40 @@ const EMBERS = Array.from({ length: 22 }, (_, i) => ({
   scale: 0.6 + ((i * 11) % 10) / 12,
 }));
 
+const MAP_THEME: Record<MapId, {
+  sky: string; hillL: string; hillR: string; water: string; moon: string; moonGlow: string;
+}> = {
+  canyon: {
+    sky: "linear-gradient(180deg,#0a1220_0%,#33264a_45%,#7a4020_100%)",
+    hillL: "#4c7a34", hillR: "#6a3424",
+    water: "linear-gradient(180deg,rgba(120,200,255,0.9),rgba(30,90,160,0.9))",
+    moon: "#f6ead0", moonGlow: "rgba(246,234,208,0.8)",
+  },
+  frost: {
+    sky: "linear-gradient(180deg,#0a1830_0%,#1c4060_55%,#2c6a94_100%)",
+    hillL: "#bfe0f2", hillR: "#a8c8e4",
+    water: "linear-gradient(180deg,rgba(200,235,252,0.95),rgba(60,120,170,0.9))",
+    moon: "#dceeff", moonGlow: "rgba(180,225,255,0.9)",
+  },
+  jungle: {
+    sky: "linear-gradient(180deg,#04140c_0%,#0c2f1a_50%,#2a5436_100%)",
+    hillL: "#3f8a35", hillR: "#2a5e28",
+    water: "linear-gradient(180deg,rgba(120,195,115,0.9),rgba(8,45,35,0.9))",
+    moon: "#dcefdd", moonGlow: "rgba(210,240,210,0.8)",
+  },
+  inferno: {
+    sky: "linear-gradient(180deg,#100302_0%,#3a0e06_55%,#7a2410_100%)",
+    hillL: "#4a2018", hillR: "#35170f",
+    water: "linear-gradient(180deg,rgba(230,90,40,0.95),rgba(50,5,8,0.9))",
+    moon: "#ff6a3b", moonGlow: "rgba(255,110,60,0.9)",
+  },
+};
+
 function MapCard({ id, selected, onPick }: { id: MapId; selected: boolean; onPick: () => void }) {
   const frost = id === "frost";
+  const jungle = id === "jungle";
+  const inferno = id === "inferno";
+  const th = MAP_THEME[id];
   return (
     <button
       onClick={onPick}
@@ -21,15 +53,19 @@ function MapCard({ id, selected, onPick }: { id: MapId; selected: boolean; onPic
       }`}
     >
       <div className="relative h-[74px] overflow-hidden">
-        <div className={frost ? "absolute inset-0 bg-[linear-gradient(180deg,#0a1830_0%,#1c4060_55%,#2c6a94_100%)]" : "absolute inset-0 bg-[linear-gradient(180deg,#0a1220_0%,#33264a_45%,#7a4020_100%)]"} />
-        {/* луна */}
-        <div className={`absolute w-5 h-5 rounded-full ${frost ? "bg-[#dceeff] right-6 top-2.5 shadow-[0_0_18px_rgba(180,225,255,0.9)]" : "bg-[#f6ead0] right-7 top-2 shadow-[0_0_16px_rgba(246,234,208,0.8)]"}`} />
+        <div className="absolute inset-0" style={{ background: th.sky.replace(/_/g, " ") }} />
+        {/* луна / багровое око */}
+        <div
+          className={`absolute w-5 h-5 rounded-full right-6 top-2.5 ${inferno ? "" : ""}`}
+          style={{ background: th.moon, boxShadow: `0 0 18px ${th.moonGlow}` }}
+        />
         {frost && <div className="absolute inset-x-0 top-0 h-10 bg-[linear-gradient(115deg,transparent_20%,rgba(80,255,170,0.22)_38%,transparent_52%,rgba(120,140,255,0.18)_68%,transparent_82%)]" />}
+        {inferno && <div className="absolute inset-x-0 bottom-0 h-8 bg-[linear-gradient(0deg,rgba(255,120,40,0.5),transparent)]" />}
         {/* холмы */}
-        <div className={`absolute bottom-0 left-0 w-[62%] h-9 ${frost ? "bg-[#bfe0f2]" : "bg-[#4c7a34]"} [clip-path:polygon(0_58%,16%_34%,32%_52%,50%_24%,70%_50%,86%_32%,100%_55%,100%_100%,0_100%)]`} />
-        <div className={`absolute bottom-0 right-0 w-[62%] h-9 ${frost ? "bg-[#a8c8e4]" : "bg-[#6a3424]"} [clip-path:polygon(0_55%,14%_30%,30%_50%,48%_22%,68%_48%,84%_30%,100%_52%,100%_100%,0_100%)]`} />
+        <div className="absolute bottom-0 left-0 w-[62%] h-9 [clip-path:polygon(0_58%,16%_34%,32%_52%,50%_24%,70%_50%,86%_32%,100%_55%,100%_100%,0_100%)]" style={{ background: th.hillL }} />
+        <div className="absolute bottom-0 right-0 w-[62%] h-9 [clip-path:polygon(0_55%,14%_30%,30%_50%,48%_22%,68%_48%,84%_30%,100%_52%,100%_100%,0_100%)]" style={{ background: th.hillR }} />
         {/* вода + плот */}
-        <div className="absolute bottom-0 left-[38%] w-[24%] h-[16px] bg-[linear-gradient(180deg,rgba(120,200,255,0.9),rgba(30,90,160,0.9))]">
+        <div className="absolute bottom-0 left-[38%] w-[24%] h-[16px]" style={{ background: th.water.replace(/_/g, " ") }}>
           <div className="absolute left-1/2 -translate-x-1/2 top-[3px] w-4 h-[3px] bg-[#7a5326] rounded-[1px]" />
         </div>
         {frost && (
@@ -37,6 +73,33 @@ function MapCard({ id, selected, onPick }: { id: MapId; selected: boolean; onPic
             <div className="absolute top-0 left-[12%] w-0 h-0 border-l-[7px] border-r-[7px] border-t-[26px] border-l-transparent border-r-transparent border-t-[#7fb8dd] opacity-90" />
             <div className="absolute top-0 left-[30%] w-0 h-0 border-l-[5px] border-r-[5px] border-t-[16px] border-l-transparent border-r-transparent border-t-[#9fd0ec] opacity-80" />
             <div className="absolute top-0 right-[20%] w-0 h-0 border-l-[8px] border-r-[8px] border-t-[30px] border-l-transparent border-r-transparent border-t-[#6fa8cc] opacity-90" />
+          </>
+        )}
+        {jungle && (
+          <>
+            {/* пальмы */}
+            <div className="absolute bottom-3 left-[14%] w-[2px] h-8 bg-[#7a5526] rotate-6" />
+            <div className="absolute bottom-9 left-[8%] w-6 h-3 rounded-full bg-[#3f8a35]" />
+            <div className="absolute bottom-3 right-[16%] w-[2px] h-7 bg-[#7a5526] -rotate-6" />
+            <div className="absolute bottom-8 right-[10%] w-5 h-3 rounded-full bg-[#2e6b2a]" />
+            {/* лианы */}
+            <div className="absolute top-0 left-[24%] w-[1.5px] h-6 bg-[#4a7a35]" />
+            <div className="absolute top-0 left-[44%] w-[1.5px] h-9 bg-[#3f6b2e]" />
+            <div className="absolute top-0 right-[30%] w-[1.5px] h-7 bg-[#4a7a35]" />
+            {/* светлячки */}
+            <div className="absolute left-[30%] top-[38%] w-1 h-1 rounded-full bg-[#c8ff9a] shadow-[0_0_6px_rgba(200,255,150,0.9)]" />
+            <div className="absolute left-[58%] top-[30%] w-1 h-1 rounded-full bg-[#c8ff9a] shadow-[0_0_6px_rgba(200,255,150,0.9)]" />
+          </>
+        )}
+        {inferno && (
+          <>
+            {/* огненные столбы */}
+            <div className="absolute bottom-0 left-[18%] w-[3px] h-9 bg-[linear-gradient(0deg,rgba(255,120,40,0.95),rgba(255,200,90,0.4),transparent)]" />
+            <div className="absolute bottom-0 right-[22%] w-[3px] h-7 bg-[linear-gradient(0deg,rgba(255,120,40,0.95),rgba(255,200,90,0.4),transparent)]" />
+            {/* шипы */}
+            <div className="absolute bottom-0 left-[8%] w-0 h-0 border-l-[4px] border-r-[4px] border-b-[10px] border-l-transparent border-r-transparent border-b-[#1a0c08]" />
+            <div className="absolute bottom-0 left-[30%] w-0 h-0 border-l-[3px] border-r-[3px] border-b-[8px] border-l-transparent border-r-transparent border-b-[#1a0c08]" />
+            <div className="absolute bottom-0 right-[10%] w-0 h-0 border-l-[4px] border-r-[4px] border-b-[11px] border-l-transparent border-r-transparent border-b-[#1a0c08]" />
           </>
         )}
       </div>
@@ -103,8 +166,9 @@ export default function MenuScreen({ onStart }: { onStart: (d: Difficulty, m: Ma
             <div className="mt-6">
               <div className="font-display font-800 text-[13px] tracking-[0.28em] text-[#e8b64a] mb-3">ПОЛЕ БИТВЫ</div>
               <div className="grid sm:grid-cols-2 gap-3">
-                <MapCard id="canyon" selected={mapId === "canyon"} onPick={() => setMapId("canyon")} />
-                <MapCard id="frost" selected={mapId === "frost"} onPick={() => setMapId("frost")} />
+                {MAPS.map((m) => (
+                  <MapCard key={m.id} id={m.id} selected={mapId === m.id} onPick={() => setMapId(m.id)} />
+                ))}
               </div>
             </div>
 

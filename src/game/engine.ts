@@ -526,21 +526,27 @@ export class Engine {
     };
     const o1 = oct(190), o2 = oct(62), o3 = oct(24);
     const frost = this.map === "frost";
+    const jungle = this.map === "jungle";
+    const inferno = this.map === "inferno";
+    const amp1 = frost ? 300 : inferno ? 320 : jungle ? 200 : 250;
+    const amp2 = frost ? 120 : inferno ? 140 : jungle ? 66 : 90;
+    const amp3 = frost ? 30 : inferno ? 40 : jungle ? 10 : 16;
     for (let x = 0; x < WORLD_W; x++) {
-      let h = 455 + (o1(x) - 0.5) * (frost ? 300 : 250) + (o2(x) - 0.5) * (frost ? 120 : 90) + (o3(x) - 0.5) * (frost ? 30 : 16);
+      let h = 455 + (o1(x) - 0.5) * amp1 + (o2(x) - 0.5) * amp2 + (o3(x) - 0.5) * amp3;
       this.heights[x] = clamp(h, 260, 820);
     }
-    const passes = frost ? 1 : 2;
+    const passes = frost || inferno ? 1 : jungle ? 3 : 2;
     for (let p = 0; p < passes; p++) {
       for (let x = 2; x < WORLD_W - 2; x++) {
         this.heights[x] = (this.heights[x - 2] + this.heights[x] * 2 + this.heights[x + 2]) / 4;
       }
     }
-    if (frost) {
-      for (let i = 0; i < 26; i++) {
+    if (frost || inferno) {
+      const n = inferno ? 32 : 26;
+      for (let i = 0; i < n; i++) {
         const cx = rng() * WORLD_W;
-        const w = 12 + rng() * 30;
-        const amp = (rng() < 0.55 ? -1 : 1) * (18 + rng() * 42);
+        const w = 12 + rng() * (inferno ? 40 : 30);
+        const amp = (rng() < 0.55 ? -1 : 1) * (18 + rng() * (inferno ? 60 : 42));
         for (let x = Math.max(2, Math.floor(cx - w)); x <= Math.min(WORLD_W - 3, Math.ceil(cx + w)); x++) {
           const t = 1 - Math.abs(x - cx) / w;
           this.heights[x] = clamp(this.heights[x] + amp * t * t, 260, 820);
@@ -1617,6 +1623,23 @@ export class Engine {
       e.x += Math.sin(this.time * 0.7 + e.phase) * e.drift * dt;
       if (e.y < -20) { e.y = WORLD_H + 10; e.x = rand(0, WORLD_W); }
     }
+    // светлячки дрейфуют (джунгли)
+    for (const ff of this.fireflies) {
+      ff.x += Math.sin(this.time * 0.6 + ff.ph) * 12 * dt;
+      ff.y += Math.cos(this.time * 0.5 + ff.ph * 1.3) * 9 * dt;
+    }
+    // огненные столбы периодически выбрасывают искры (Преисподняя)
+    if (this.map === "inferno") {
+      this.pillarT -= dt;
+      if (this.pillarT <= 0 && this.firePillars.length) {
+        this.pillarT = rand(0.5, 1.6);
+        const px = this.firePillars[Math.floor(Math.random() * this.firePillars.length)];
+        const gy = this.surface(px);
+        for (let k = 0; k < 8; k++) {
+          this.particles.push({ x: px + rand(-8, 8), y: gy - rand(0, 60), vx: rand(-25, 25), vy: -rand(120, 320), life: rand(0.4, 0.9), max: 0.9, size: rand(1.8, 3.4), color: Math.random() < 0.5 ? "#ffd66b" : "#ff7a2a", grav: -60, kind: "spark" });
+        }
+      }
+    }
 
     if (this.screen !== "game") return;
 
@@ -2347,6 +2370,14 @@ export class Engine {
       g.addColorStop(0, "#15283e");
       g.addColorStop(0.5, "#0e1d30");
       g.addColorStop(1, "#081120");
+    } else if (this.map === "jungle") {
+      g.addColorStop(0, "#1e3018");
+      g.addColorStop(0.5, "#131f0e");
+      g.addColorStop(1, "#0a1207");
+    } else if (this.map === "inferno") {
+      g.addColorStop(0, "#3a1508");
+      g.addColorStop(0.5, "#260c04");
+      g.addColorStop(1, "#140602");
     } else {
       g.addColorStop(0, "#332312");
       g.addColorStop(0.5, "#211608");
@@ -2391,7 +2422,11 @@ export class Engine {
     const frost = this.map === "frost";
     const cols = frost
       ? (side === 0 ? ["#2c4d6e", "#1d3a56", "#12253c"] : ["#28455f", "#1a3350", "#101f34"])
-      : (side === 0 ? ["#54401f", "#3a2b14", "#221808"] : ["#4d3128", "#34211b", "#1e120d"]);
+      : this.map === "jungle"
+        ? (side === 0 ? ["#3a5a26", "#27401a", "#16280e"] : ["#4d3a20", "#362812", "#20170a"])
+        : this.map === "inferno"
+          ? (side === 0 ? ["#4a2517", "#331a0e", "#1e0f07"] : ["#3d1d14", "#2a130c", "#180a06"])
+          : (side === 0 ? ["#54401f", "#3a2b14", "#221808"] : ["#4d3128", "#34211b", "#1e120d"]);
     const g = c.createLinearGradient(0, 240, 0, WORLD_H);
     g.addColorStop(0, cols[0]);
     g.addColorStop(0.5, cols[1]);
@@ -2686,6 +2721,95 @@ export class Engine {
     c.scale(t.s, t.s);
     const rng = mulberry32(Math.floor(t.seed * 97) + 11);
     const frost = this.map === "frost";
+    const jungle = this.map === "jungle";
+    const inferno = this.map === "inferno";
+
+    if (jungle) {
+      // ПАЛЬМА: изогнутый ствол + веер листьев + кокосы
+      const lean = (rng() - 0.5) * 0.5;
+      const H = 74;
+      const tg = c.createLinearGradient(-3, 0, 3, 0);
+      tg.addColorStop(0, "#4a3018");
+      tg.addColorStop(0.5, "#7a5526");
+      tg.addColorStop(1, "#3a2412");
+      c.fillStyle = tg;
+      c.beginPath();
+      c.moveTo(-3.6, 0);
+      c.quadraticCurveTo(-2 + lean * 20, -H * 0.55, lean * 34 - 2.4, -H);
+      c.lineTo(lean * 34 + 2.4, -H);
+      c.quadraticCurveTo(2 + lean * 20, -H * 0.55, 3.6, 0);
+      c.closePath();
+      c.fill();
+      // кольца на стволе
+      c.strokeStyle = "rgba(40,24,10,0.5)";
+      c.lineWidth = 1;
+      for (let i = 1; i < 7; i++) {
+        const yy = -H * (i / 7);
+        const xx = lean * 34 * (i / 7) * (i / 7) * 1.6;
+        c.beginPath(); c.moveTo(xx - 3, yy); c.lineTo(xx + 3, yy); c.stroke();
+      }
+      // веер листьев
+      const topX = lean * 34, topY = -H;
+      const leafCols = ["#2e6b2a", "#3f8a35", "#55a844", "#2a5e28"];
+      for (let i = 0; i < 8; i++) {
+        const a = -Math.PI + (i / 7) * Math.PI + (rng() - 0.5) * 0.2;
+        const sway = Math.sin(this.time * 1.1 + t.seed + i) * 0.05;
+        c.strokeStyle = leafCols[i % 4];
+        c.lineWidth = 4.6 - (i % 2);
+        c.lineCap = "round";
+        c.beginPath();
+        c.moveTo(topX, topY);
+        const L = 34 + rng() * 14;
+        c.quadraticCurveTo(
+          topX + Math.cos(a + sway) * L * 0.6,
+          topY + Math.sin(a + sway) * L * 0.5 - 8,
+          topX + Math.cos(a + sway) * L,
+          topY + Math.sin(a + sway) * L * 0.75 + 10
+        );
+        c.stroke();
+      }
+      // кокосы
+      c.fillStyle = "#5e4426";
+      c.beginPath(); c.arc(topX - 3, topY + 4, 3, 0, Math.PI * 2); c.arc(topX + 3, topY + 5, 3, 0, Math.PI * 2); c.fill();
+      c.restore();
+      return;
+    }
+
+    if (inferno) {
+      // АДСКОЕ МЁРТВОЕ ДЕРЕВО: чёрные корявые ветви + тлеющие трещины
+      c.strokeStyle = "#140b08";
+      c.lineCap = "round";
+      c.lineWidth = 5;
+      c.beginPath();
+      c.moveTo(0, 0);
+      c.quadraticCurveTo(-3, -26, 2, -52);
+      c.stroke();
+      c.lineWidth = 3;
+      c.beginPath();
+      c.moveTo(0, -22); c.quadraticCurveTo(-14, -34, -24, -40);
+      c.moveTo(1, -34); c.quadraticCurveTo(12, -46, 20, -56);
+      c.moveTo(2, -52); c.quadraticCurveTo(-6, -66, -10, -76);
+      c.moveTo(2, -52); c.quadraticCurveTo(8, -68, 14, -78);
+      c.stroke();
+      c.lineWidth = 1.8;
+      c.beginPath();
+      c.moveTo(-24, -40); c.lineTo(-30, -46);
+      c.moveTo(20, -56); c.lineTo(26, -60);
+      c.moveTo(-10, -76); c.lineTo(-14, -84);
+      c.stroke();
+      // тлеющие прожилки
+      const gl = 0.35 + 0.3 * Math.sin(this.time * 2.4 + t.seed);
+      c.strokeStyle = `rgba(255,110,40,${gl})`;
+      c.lineWidth = 1.2;
+      c.beginPath();
+      c.moveTo(-1, -6); c.lineTo(1, -20); c.lineTo(-1, -34);
+      c.moveTo(12, -48); c.lineTo(16, -54);
+      c.stroke();
+      c.fillStyle = `rgba(255,140,50,${gl})`;
+      c.beginPath(); c.arc(14, -78, 1.8, 0, Math.PI * 2); c.arc(-30, -46, 1.5, 0, Math.PI * 2); c.fill();
+      c.restore();
+      return;
+    }
 
     if (frost) {
       // ель
