@@ -18,12 +18,14 @@ export type Team = 0 | 1;
 export type Screen = "menu" | "game" | "over";
 export type Phase = "idle" | "aim" | "ai" | "flight" | "settle";
 export type Difficulty = 0 | 1 | 2;
-export type MapId = "canyon" | "frost";
+export type MapId = "canyon" | "frost" | "jungle" | "inferno";
 export type BattleMode = 4 | 10;
 
 export const MAPS: { id: MapId; name: string; desc: string }[] = [
-  { id: "canyon", name: "Каньон Пороха", desc: "Зелёные холмы Рассвета против выжженной земли Легиона. Глубокое озеро и плот посередине." },
-  { id: "frost", name: "Ледяная пещера", desc: "Морозный разлом со сталактитами, замёрзшим озером и северным сиянием в небе." },
+  { id: "canyon", name: "Каньон Пороха", desc: "Зелёные холмы Рассвета против выжженной земли Легиона. Глубокое озеро посередине — переправа только на плоту." },
+  { id: "frost", name: "Ледяная пещера", desc: "Морозный разлом со сталактитами и ледяной водой. Северное сияние в небе." },
+  { id: "jungle", name: "Джунгли Амазонки", desc: "Непролазная чаща: пальмы, лианы, светлячки. Топкое болото в центре — не бултыхаться, утонешь!" },
+  { id: "inferno", name: "Преисподняя", desc: "Адская пустошь: огненные столбы, шипы и Озеро Проклятых. Через него ходит лишь паром Харона." },
 ];
 
 export const DIFFS: { name: string; desc: string }[] = [

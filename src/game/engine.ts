@@ -109,6 +109,11 @@ export class Engine {
   private map: MapId = "canyon";
   private dripT = 0;
   private geyserT = 2;
+  private vines: { x: number; len: number; ph: number }[] = [];
+  private firePillars: number[] = [];
+  private hellSpikes: Spike[] = [];
+  private fireflies: { x: number; y: number; ph: number }[] = [];
+  private pillarT = 0;
 
   // плот
   private raft = { x: WORLD_W / 2, dir: 1, dx: 0, half: 36 };
@@ -448,16 +453,6 @@ export class Engine {
     if (this.screen !== "game" || this.phase !== "aim") return;
     const h = this.cur();
     if (h.team !== 0) return;
-    if (h.wet && !h.onGround) {
-      // выпрыгнуть из воды
-      if (this.moveLeft < 15) return;
-      h.vy = -300;
-      h.wet = false;
-      this.moveLeft -= 15;
-      sfx.jump();
-      this.emit();
-      return;
-    }
     if (!h.onGround || this.moveLeft < JUMP_COST) return;
     h.vy = -430;
     h.onGround = false;
@@ -606,6 +601,40 @@ export class Engine {
         }
       }
     }
+
+    // лианы (джунгли)
+    this.vines = [];
+    if (this.map === "jungle") {
+      for (let i = 0; i < 14; i++) {
+        this.vines.push({ x: rng() * WORLD_W, len: 130 + rng() * 220, ph: rng() * 10 });
+      }
+    }
+
+    // огненные столбы и адские шипы (Преисподняя)
+    this.firePillars = [];
+    this.hellSpikes = [];
+    if (this.map === "inferno") {
+      for (let i = 0; i < 6; i++) {
+        const x = 120 + rng() * (WORLD_W - 240);
+        if (Math.abs(x - WORLD_W / 2) > LAKE_HALF + 60) this.firePillars.push(x);
+      }
+      for (let i = 0; i < 18; i++) {
+        const x = 60 + rng() * (WORLD_W - 120);
+        const sy = this.surface(x);
+        if (sy < WORLD_H - 60 && Math.abs(x - WORLD_W / 2) > LAKE_HALF + 40) {
+          this.hellSpikes.push({ x, w: 7 + rng() * 12, len: 26 + rng() * 52, lean: (rng() - 0.5) * 0.3 });
+        }
+      }
+    }
+
+    // светлячки (джунгли)
+    this.fireflies = [];
+    if (this.map === "jungle") {
+      for (let i = 0; i < 26; i++) {
+        const x = rng() * WORLD_W;
+        this.fireflies.push({ x, y: this.surface(x) - 40 - rng() * 120, ph: rng() * 10 });
+      }
+    }
     this.terrainDirty = true;
   }
 
@@ -652,11 +681,23 @@ export class Engine {
     const c = this.terrainCanvas.getContext("2d")!;
     const H = WORLD_H, half = WORLD_W / 2;
     const frost = this.map === "frost";
+    const jungle = this.map === "jungle";
+    const inferno = this.map === "inferno";
     c.clearRect(0, 0, WORLD_W, H);
     const biomes = frost
       ? [
           { dirtTop: "#a8d4e8", dirtMid: "#4a86b0", dirtDeep: "#122b46", grass: "#e8f4fb", grassHi: "#ffffff", edge: "#9fc8e0", tufts: ["#f0f8fd", "#cfe4f2", "#e0eef8"] },
           { dirtTop: "#9fc4e0", dirtMid: "#3f74a0", dirtDeep: "#101f38", grass: "#e0eefb", grassHi: "#f6fbff", edge: "#8fb4d4", tufts: ["#e8f2fb", "#c4d8ee", "#d8e8f6"] },
+        ]
+      : jungle
+      ? [
+          { dirtTop: "#5a4a26", dirtMid: "#40331a", dirtDeep: "#20180c", grass: "#3fae4e", grassHi: "#7ed957", edge: "#2c8a3a", tufts: ["#5fcf6a", "#2f9440", "#4cb85a"] },
+          { dirtTop: "#4a3d20", dirtMid: "#352b12", dirtDeep: "#1a140a", grass: "#359446", grassHi: "#6bc24e", edge: "#268034", tufts: ["#4cb85a", "#27823a", "#3fae4e"] },
+        ]
+      : inferno
+      ? [
+          { dirtTop: "#4a2a22", dirtMid: "#301812", dirtDeep: "#140906", grass: "#8a3a24", grassHi: "#c2502e", edge: "#6a2a18", tufts: ["#a04a2c", "#7c3a20", "#b0562f"] },
+          { dirtTop: "#3c241e", dirtMid: "#281410", dirtDeep: "#100705", grass: "#7c3420", grassHi: "#b04828", edge: "#5c2416", tufts: ["#944426", "#70321c", "#a04e2a"] },
         ]
       : [
           { dirtTop: "#6b532f", dirtMid: "#4a3520", dirtDeep: "#241708", grass: "#7fae45", grassHi: "#a8d468", edge: "#5d8432", tufts: ["#93c255", "#6b9a3a", "#86b84c"] },
@@ -815,13 +856,45 @@ export class Engine {
             c.stroke();
           }
           const det = r2();
-          if (side === 0 && det > 0.84) {
-            c.fillStyle = det > 0.93 ? "#ffe9a0" : "#f2f0e4";
-            c.beginPath(); c.arc(x + 2, y0 - 7 - det * 3, 1.4, 0, Math.PI * 2); c.fill();
+          if (det > 0.86) {
+            if (jungle) {
+              // папоротник / крупный лист
+              c.strokeStyle = det > 0.93 ? "#5fcf6a" : "#2f9440";
+              c.lineWidth = 1.4;
+              const fx = x + 2, fy = y0;
+              c.beginPath();
+              c.moveTo(fx, fy);
+              c.quadraticCurveTo(fx + (det > 0.93 ? 8 : -8), fy - 9, fx + (det > 0.93 ? 15 : -15), fy - 6);
+              c.stroke();
+            } else if (inferno) {
+              // тлеющий уголёк / кость
+              c.fillStyle = det > 0.93 ? "rgba(255,120,50,0.6)" : "rgba(220,210,190,0.5)";
+              if (det > 0.93) { c.beginPath(); c.ellipse(x - 2, y0 - 1, 2, 1.2, 0, 0, Math.PI * 2); c.fill(); }
+              else { c.fillRect(x - 4, y0 - 2.4, 8, 1.8); }
+            } else {
+              c.fillStyle = side === 0 ? (det > 0.93 ? "#ffe9a0" : "#f2f0e4") : "rgba(90,80,74,0.7)";
+              if (side === 0) { c.beginPath(); c.arc(x + 2, y0 - 7 - det * 3, 1.4, 0, Math.PI * 2); c.fill(); }
+              else { c.beginPath(); c.ellipse(x - 2, y0 - 0.7, 1.8, 1.1, 0, 0, Math.PI * 2); c.fill(); }
+            }
           }
-          if (side === 1 && det > 0.87) {
-            c.fillStyle = det > 0.94 ? "rgba(255,120,50,0.5)" : "rgba(90,80,74,0.7)";
-            c.beginPath(); c.ellipse(x - 2, y0 - 0.7, 1.8, 1.1, 0, 0, Math.PI * 2); c.fill();
+        }
+        // светящиеся трещины Преисподней
+        if (inferno) {
+          c.strokeStyle = "rgba(255,120,40,0.4)";
+          c.lineWidth = 1.6;
+          for (let x = xa + 20; x < Math.min(xb, WORLD_W) - 20; x += 47) {
+            const y0 = this.heights[x];
+            if (y0 >= H) continue;
+            const r2 = mulberry32(x * 41 + side * 13);
+            c.beginPath();
+            c.moveTo(x, y0 + 2);
+            c.lineTo(x + 5, y0 + 8);
+            c.lineTo(x + 2, y0 + 14);
+            c.stroke();
+            if (r2() > 0.6) {
+              c.fillStyle = `rgba(255,150,60,${0.25 + r2() * 0.2})`;
+              c.beginPath(); c.arc(x + 3, y0 + 8, 1.6, 0, Math.PI * 2); c.fill();
+            }
           }
         }
       }
@@ -1220,16 +1293,13 @@ export class Engine {
         continue;
       }
 
-      // всплеск при входе в воду
+      // вода гасит снаряд (динамит взрывается под водой)
       const wl = this.waterLevelAt(p.x);
-      if (!p.wet && wl !== null && p.y > wl && p.y < this.surface(p.x)) {
-        p.wet = true;
-        p.vx *= 0.68;
-        p.vy *= 0.5;
-        sfx.splash();
-        for (let k = 0; k < 8; k++) {
-          this.particles.push({ x: p.x + rand(-4, 4), y: wl, vx: rand(-70, 70), vy: -rand(40, 150), life: rand(0.3, 0.55), max: 0.55, size: rand(1.4, 2.6), color: "rgba(160,215,250,0.9)", grav: 500, kind: "spark" });
-        }
+      if (wl !== null && p.y > wl && p.y < this.surface(p.x)) {
+        this.waterSplash(p.x);
+        if (def.kind === "fuse") { this.explodeProj(i); }
+        else this.projs.splice(i, 1);
+        continue;
       }
 
       if (p.x < -80 || p.x > WORLD_W + 80 || p.y > WORLD_H + 300) {
@@ -1402,6 +1472,48 @@ export class Engine {
     this.checkWin();
   }
 
+  // мгновенное утопление: пузыри, всплеск, тело идёт ко дну
+  private drownKill(h: Hero) {
+    if (!h.alive) return;
+    h.hp = 0;
+    h.alive = false;
+    h.wet = false;
+    sfx.splash();
+    sfx.gasp();
+    this.shake = Math.min(26, this.shake + 7);
+    // всплеск
+    for (let i = 0; i < 14; i++) {
+      const a = rand(-Math.PI, 0), s = rand(50, 260);
+      this.particles.push({ x: h.x, y: this.waterY, vx: Math.cos(a) * s * 0.5, vy: Math.sin(a) * s, life: rand(0.4, 0.7), max: 0.7, size: rand(1.6, 3.2), color: "rgba(170,220,250,0.9)", grav: 480, kind: "spark" });
+    }
+    // пузыри со дна
+    for (let i = 0; i < 12; i++) {
+      this.particles.push({ x: h.x + rand(-10, 10), y: this.waterY + rand(6, 20), vx: rand(-14, 14), vy: -rand(26, 80), life: rand(0.5, 1.1), max: 1.1, size: rand(1.4, 3.4), color: "rgba(210,240,255,0.75)", grav: -40, kind: "heal" });
+    }
+    const lbl = this.map === "inferno" ? "ПРОКЛЯТ!" : this.map === "jungle" ? "УТЯНУЛИ ПИЯВКИ!" : "УТОНУЛ!";
+    const col = this.map === "inferno" ? "#ff7a3b" : "#7fc4e8";
+    this.dmgNums.push({ x: h.x, y: this.waterY - 24, life: 1.5, text: lbl, color: col, size: 18 });
+    const other = (1 - h.team) as Team;
+    if (this.heroes.some((e) => e.team === other && e.alive)) {
+      this.stats.kills[other]++;
+      this.teamGold[other] += KILL_GOLD;
+      this.stats.gold[other] += KILL_GOLD;
+      this.dmgNums.push({ x: h.x, y: this.waterY - 50, life: 1.5, text: "+" + KILL_GOLD + " зол.", color: "#f5d67b", size: 14 });
+      sfx.coin();
+      if (other === 0) sfx.ovation();
+    }
+    h.y = this.waterY + 90; // тело уходит ко дну
+    this.checkWin();
+  }
+
+  private waterSplash(x: number) {
+    sfx.splash();
+    for (let i = 0; i < 10; i++) {
+      const a = rand(-Math.PI, 0), s = rand(40, 220);
+      this.particles.push({ x, y: this.waterY, vx: Math.cos(a) * s * 0.5, vy: Math.sin(a) * s, life: rand(0.35, 0.6), max: 0.6, size: rand(1.4, 3), color: "rgba(170,220,250,0.9)", grav: 480, kind: "spark" });
+    }
+  }
+
   private lavaSplash(x: number) {
     sfx.splash();
     for (let i = 0; i < 12; i++) {
@@ -1475,16 +1587,15 @@ export class Engine {
     }
     h.x = nx;
     h.vy = 0;
-    if (ny > this.waterY + 8) {
-      // телепорт в озеро: на плот, если рядом, иначе — вплавь
+    if (this.hasLake && nx >= this.lakeL && nx <= this.lakeR && ny > this.waterY + 8) {
+      // телепорт в озеро: только на плот, иначе вода убьёт
       if (Math.abs(nx - this.raft.x) <= this.raft.half + 10) {
         h.y = this.raftDeckY();
         h.onGround = true;
         h.wet = false;
       } else {
-        h.y = this.waterY - 2;
-        h.onGround = false;
-        h.wet = true;
+        this.dmgNums.push({ x: nx, y: this.waterY - 30, life: 1, text: "Там вода — утонешь!", color: "#7fc4e8", size: 13 });
+        return;
       }
     } else {
       h.y = ny;
@@ -1628,26 +1739,11 @@ export class Engine {
           h.walkPhase += dt * 11;
         }
       } else if (inLake) {
-        // плывёт
-        if (!h.wet) {
-          h.wet = true;
-          sfx.splash();
-          for (let k = 0; k < 8; k++) {
-            this.particles.push({ x: h.x + rand(-8, 8), y: this.waterY, vx: rand(-80, 80), vy: -rand(40, 160), life: rand(0.3, 0.6), max: 0.6, size: rand(1.6, 3), color: "rgba(160,215,250,0.9)", grav: 500, kind: "spark" });
-          }
-        }
+        // вода смертельна: коснулся — утонул
+        if (h.y >= this.waterY - 4) { this.drownKill(h); continue; }
         h.onGround = false;
-        h.vy = 0;
-        h.y += (this.waterY - 2 - h.y) * Math.min(1, dt * 5);
-        if (isActive && this.moveInput !== 0 && this.moveLeft > 0) {
-          const step = Math.min(85 * dt, this.moveLeft);
-          h.x = clamp(h.x + this.moveInput * step, 18, WORLD_W - 18);
-          this.moveLeft -= step;
-          h.walkPhase += dt * 7;
-          if (Math.random() < dt * 5) {
-            this.particles.push({ x: h.x - this.moveInput * 10, y: this.waterY + 1, vx: -this.moveInput * rand(10, 30), vy: -rand(6, 20), life: 0.5, max: 0.5, size: rand(1.5, 3), color: "rgba(190,230,250,0.7)", grav: 300, kind: "spark" });
-          }
-        }
+        h.vy += GRAVITY * 0.92 * dt;
+        h.y += h.vy * dt;
       } else {
         h.wet = false;
         // обычная физика
@@ -1697,6 +1793,8 @@ export class Engine {
         c.y += c.vy * dt;
         const sy = this.surface(c.x);
         if (c.y >= sy - 10 && sy < WORLD_H) { c.y = sy - 10; c.landed = true; }
+        const cwl = this.waterLevelAt(c.x);
+        if (cwl !== null && c.y > cwl) { this.waterSplash(c.x); this.crates.splice(i, 1); continue; }
         if (c.y > LAVA_TOP) { this.lavaSplash(c.x); this.crates.splice(i, 1); }
       }
     }
@@ -1719,7 +1817,7 @@ export class Engine {
     } else if (this.phase === "ai") {
       this.aiUpdate(dt);
     } else if (this.phase === "settle") {
-      const settled = this.heroes.every((h) => !h.alive || h.onGround || h.wet);
+      const settled = this.heroes.every((h) => !h.alive || h.onGround);
       this.settleT += dt;
       const hurry = !this.cur().alive;
       if ((settled && this.settleT > 0.55) || (hurry && this.settleT > 0.25)) this.nextTurn();
@@ -1773,6 +1871,8 @@ export class Engine {
     c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     const { cw, ch } = this;
     const frost = this.map === "frost";
+    const jungle = this.map === "jungle";
+    const inferno = this.map === "inferno";
 
     const sky = c.createLinearGradient(0, 0, 0, ch);
     if (frost) {
@@ -1780,6 +1880,16 @@ export class Engine {
       sky.addColorStop(0.45, "#0d1c30");
       sky.addColorStop(0.78, "#16304a");
       sky.addColorStop(1, "#1d3a55");
+    } else if (jungle) {
+      sky.addColorStop(0, "#04140c");
+      sky.addColorStop(0.45, "#0a2418");
+      sky.addColorStop(0.78, "#143826");
+      sky.addColorStop(1, "#2a5436");
+    } else if (inferno) {
+      sky.addColorStop(0, "#100302");
+      sky.addColorStop(0.4, "#240705");
+      sky.addColorStop(0.75, "#4a0e06");
+      sky.addColorStop(1, "#7c1e08");
     } else {
       sky.addColorStop(0, "#070b16");
       sky.addColorStop(0.45, "#122036");
@@ -1800,31 +1910,41 @@ export class Engine {
     const xMin = this.camX - cw / (2 * S) - 80;
     const xMax = this.camX + cw / (2 * S) + 80;
 
-    // туманности
-    for (const nb of this.nebulae) {
-      const g = c.createRadialGradient(nb.x, nb.y, 10, nb.x, nb.y, nb.r);
-      g.addColorStop(0, nb.color);
-      g.addColorStop(1, "rgba(0,0,0,0)");
-      c.fillStyle = g;
-      c.beginPath(); c.arc(nb.x, nb.y, nb.r, 0, Math.PI * 2); c.fill();
-    }
-    // звёзды
-    for (const s of this.stars) {
-      const tw = 0.4 + 0.6 * Math.abs(Math.sin(this.time * 1.4 + s.tw));
-      c.fillStyle = `rgba(235,240,255,${0.5 * tw})`;
-      c.fillRect(s.x, s.y, s.s, s.s);
-    }
-    for (const s of this.brightStars) {
-      const tw = 0.5 + 0.5 * Math.sin(this.time * 2 + s.tw);
-      c.fillStyle = `rgba(240,248,255,${0.75 + 0.25 * tw})`;
-      c.beginPath(); c.arc(s.x, s.y, s.s * 0.8, 0, Math.PI * 2); c.fill();
-      c.strokeStyle = `rgba(220,235,255,${0.35 * tw})`;
-      c.lineWidth = 1;
-      const L = s.s * (3 + tw * 3);
-      c.beginPath();
-      c.moveTo(s.x - L, s.y); c.lineTo(s.x + L, s.y);
-      c.moveTo(s.x, s.y - L); c.lineTo(s.x, s.y + L);
-      c.stroke();
+    if (!inferno) {
+      // туманности
+      for (const nb of this.nebulae) {
+        const g = c.createRadialGradient(nb.x, nb.y, 10, nb.x, nb.y, nb.r);
+        g.addColorStop(0, nb.color);
+        g.addColorStop(1, "rgba(0,0,0,0)");
+        c.fillStyle = g;
+        c.beginPath(); c.arc(nb.x, nb.y, nb.r, 0, Math.PI * 2); c.fill();
+      }
+      // звёзды
+      for (const s of this.stars) {
+        const tw = 0.4 + 0.6 * Math.abs(Math.sin(this.time * 1.4 + s.tw));
+        c.fillStyle = `rgba(235,240,255,${0.5 * tw})`;
+        c.fillRect(s.x, s.y, s.s, s.s);
+      }
+      for (const s of this.brightStars) {
+        const tw = 0.5 + 0.5 * Math.sin(this.time * 2 + s.tw);
+        c.fillStyle = `rgba(240,248,255,${0.75 + 0.25 * tw})`;
+        c.beginPath(); c.arc(s.x, s.y, s.s * 0.8, 0, Math.PI * 2); c.fill();
+        c.strokeStyle = `rgba(220,235,255,${0.35 * tw})`;
+        c.lineWidth = 1;
+        const L = s.s * (3 + tw * 3);
+        c.beginPath();
+        c.moveTo(s.x - L, s.y); c.lineTo(s.x + L, s.y);
+        c.moveTo(s.x, s.y - L); c.lineTo(s.x, s.y + L);
+        c.stroke();
+      }
+    } else {
+      // Преисподняя: падающий пепел
+      for (let i = 0; i < 60; i++) {
+        const ax = ((i * 197.3 + this.time * 14) % (xMax - xMin)) + xMin;
+        const ay = ((i * 131.7 + this.time * (24 + (i % 5) * 8)) % (WORLD_H * 0.9));
+        c.fillStyle = `rgba(120,100,90,${0.14 + (i % 4) * 0.05})`;
+        c.fillRect(ax, ay - 260, 1.8, 1.8);
+      }
     }
     // северное сияние
     if (frost) {
@@ -1850,31 +1970,71 @@ export class Engine {
       }
       c.restore();
     }
-    // луна
+    // луна / багровое солнце Преисподней
     const MOON_X = WORLD_W * 0.73;
     const mg = 1 + Math.sin(this.time * 0.8) * 0.05;
-    const moon = c.createRadialGradient(MOON_X, 108, 8, MOON_X, 108, 170 * mg);
-    moon.addColorStop(0, "rgba(250,240,208,0.98)");
-    moon.addColorStop(0.17, "rgba(250,236,200,0.8)");
-    moon.addColorStop(0.3, "rgba(250,224,170,0.2)");
-    moon.addColorStop(1, "rgba(250,220,170,0)");
-    c.fillStyle = moon;
-    c.beginPath(); c.arc(MOON_X, 108, 170 * mg, 0, Math.PI * 2); c.fill();
-    c.fillStyle = "#f6ead0";
-    c.beginPath(); c.arc(MOON_X, 108, 32, 0, Math.PI * 2); c.fill();
-    c.fillStyle = "rgba(190,170,130,0.35)";
-    c.beginPath(); c.arc(MOON_X - 10, 100, 6, 0, Math.PI * 2); c.arc(MOON_X + 10, 118, 4, 0, Math.PI * 2); c.arc(MOON_X + 2, 96, 3, 0, Math.PI * 2); c.fill();
+    if (inferno) {
+      const sun = c.createRadialGradient(MOON_X, 120, 10, MOON_X, 120, 190 * mg);
+      sun.addColorStop(0, "rgba(255,110,40,0.95)");
+      sun.addColorStop(0.22, "rgba(220,60,20,0.7)");
+      sun.addColorStop(0.4, "rgba(160,30,10,0.25)");
+      sun.addColorStop(1, "rgba(120,20,5,0)");
+      c.fillStyle = sun;
+      c.beginPath(); c.arc(MOON_X, 120, 190 * mg, 0, Math.PI * 2); c.fill();
+      c.fillStyle = "#3a0d05";
+      c.beginPath(); c.arc(MOON_X, 120, 40, 0, Math.PI * 2); c.fill();
+      c.strokeStyle = "rgba(255,120,50,0.55)";
+      c.lineWidth = 2.5;
+      c.beginPath(); c.arc(MOON_X, 120, 40, 0, Math.PI * 2); c.stroke();
+    } else {
+      const moon = c.createRadialGradient(MOON_X, 108, 8, MOON_X, 108, 170 * mg);
+      const tint = jungle ? "rgba(210,240,210," : "rgba(250,236,200,";
+      moon.addColorStop(0, tint + "0.98)");
+      moon.addColorStop(0.17, tint + "0.8)");
+      moon.addColorStop(0.3, tint + "0.2)");
+      moon.addColorStop(1, tint + "0)");
+      c.fillStyle = moon;
+      c.beginPath(); c.arc(MOON_X, 108, 170 * mg, 0, Math.PI * 2); c.fill();
+      c.fillStyle = jungle ? "#dcefdd" : "#f6ead0";
+      c.beginPath(); c.arc(MOON_X, 108, 32, 0, Math.PI * 2); c.fill();
+      c.fillStyle = "rgba(190,170,130,0.35)";
+      c.beginPath(); c.arc(MOON_X - 10, 100, 6, 0, Math.PI * 2); c.arc(MOON_X + 10, 118, 4, 0, Math.PI * 2); c.arc(MOON_X + 2, 96, 3, 0, Math.PI * 2); c.fill();
+    }
 
-    // золотое свечение у горизонта
+    // свечение у горизонта
     const hor = c.createLinearGradient(0, 250, 0, 430);
-    hor.addColorStop(0, "rgba(217,164,65,0)");
-    hor.addColorStop(1, frost ? "rgba(90,160,220,0.08)" : "rgba(217,164,65,0.09)");
+    const horCol = frost ? "rgba(90,160,220,0.08)" : jungle ? "rgba(120,220,120,0.10)" : inferno ? "rgba(255,110,40,0.16)" : "rgba(217,164,65,0.09)";
+    hor.addColorStop(0, "rgba(0,0,0,0)");
+    hor.addColorStop(1, horCol);
     c.fillStyle = hor;
     c.fillRect(xMin, 250, xMax - xMin, 180);
 
+    // световые лучи сквозь листву (джунгли)
+    if (jungle) {
+      c.save();
+      c.globalCompositeOperation = "lighter";
+      for (let i = 0; i < 4; i++) {
+        const rx = 300 + i * 620 + Math.sin(this.time * 0.3 + i) * 40;
+        const rg = c.createLinearGradient(rx, -40, rx + 120, 420);
+        rg.addColorStop(0, "rgba(190,255,180,0.10)");
+        rg.addColorStop(1, "rgba(190,255,180,0)");
+        c.fillStyle = rg;
+        c.beginPath();
+        c.moveTo(rx, -40);
+        c.lineTo(rx + 60, -40);
+        c.lineTo(rx + 200, 420);
+        c.lineTo(rx + 90, 420);
+        c.closePath();
+        c.fill();
+      }
+      c.restore();
+    }
+
     // горы
-    this.drawMountains(c, xMin, xMax, 0.35, 300, 150, frost ? "#0d1a2e" : "#101a2c");
-    this.drawMountains(c, xMin, xMax, 0.6, 380, 120, frost ? "#0a1424" : "#0d1421");
+    const m1 = frost ? "#0d1a2e" : jungle ? "#0a2015" : inferno ? "#260906" : "#101a2c";
+    const m2 = frost ? "#0a1424" : jungle ? "#071810" : inferno ? "#1a0604" : "#0d1421";
+    this.drawMountains(c, xMin, xMax, 0.35, 300, 150, m1);
+    this.drawMountains(c, xMin, xMax, 0.6, 380, 120, m2);
 
     // сталактиты с потолка
     if (frost) {
@@ -1949,6 +2109,28 @@ export class Engine {
       }
     }
 
+    // адские шипы (Преисподняя)
+    if (inferno) {
+      for (const st of this.hellSpikes) {
+        if (st.x < xMin - 40 || st.x > xMax + 40) continue;
+        const baseY = this.surface(st.x);
+        if (baseY >= WORLD_H) continue;
+        const g = c.createLinearGradient(st.x, baseY, st.x, baseY - st.len);
+        g.addColorStop(0, "#1c0b08");
+        g.addColorStop(0.75, "#3a150e");
+        g.addColorStop(1, "#8a3a20");
+        c.fillStyle = g;
+        c.beginPath();
+        c.moveTo(st.x - st.w / 2, baseY + 2);
+        c.quadraticCurveTo(st.x - st.w * 0.14, baseY - st.len * 0.6, st.x + st.lean * st.len * 0.2, baseY - st.len);
+        c.quadraticCurveTo(st.x + st.w * 0.18, baseY - st.len * 0.55, st.x + st.w / 2, baseY + 2);
+        c.closePath();
+        c.fill();
+        c.fillStyle = "rgba(255,130,50,0.7)";
+        c.beginPath(); c.arc(st.x + st.lean * st.len * 0.2, baseY - st.len, 1.7, 0, Math.PI * 2); c.fill();
+      }
+    }
+
     // угольки
     for (const e of this.embers) {
       const a = 0.35 + 0.3 * Math.sin(this.time * 2 + e.phase);
@@ -1968,16 +2150,85 @@ export class Engine {
       c.beginPath(); c.ellipse(f.x, f.y, f.r * 0.68, 5.5, 0, 0, Math.PI * 2); c.fill();
     }
 
+    // огненные столбы (Преисподняя)
+    if (inferno) {
+      for (const px of this.firePillars) {
+        if (px < xMin - 60 || px > xMax + 60) continue;
+        const baseY = this.surface(px);
+        if (baseY >= WORLD_H) continue;
+        const flick = Math.sin(this.time * 11 + px) * 0.5 + Math.sin(this.time * 5.3 + px * 2) * 0.5;
+        const hgt = 60 + flick * 16;
+        const g = c.createRadialGradient(px, baseY - hgt * 0.4, 4, px, baseY - hgt * 0.4, hgt);
+        g.addColorStop(0, "rgba(255,200,90,0.4)");
+        g.addColorStop(1, "rgba(255,90,20,0)");
+        c.fillStyle = g;
+        c.beginPath(); c.arc(px, baseY - hgt * 0.4, hgt, 0, Math.PI * 2); c.fill();
+        for (const [w2, h2, col] of [[11, hgt, "rgba(255,120,30,0.55)"], [7, hgt * 0.82, "rgba(255,170,60,0.7)"], [3.6, hgt * 0.6, "rgba(255,230,140,0.9)"]] as const) {
+          c.fillStyle = col;
+          c.beginPath();
+          c.moveTo(px - w2, baseY);
+          c.quadraticCurveTo(px - w2 * 0.8, baseY - h2 * 0.55, px + Math.sin(this.time * 9 + px) * 3, baseY - h2);
+          c.quadraticCurveTo(px + w2 * 0.8, baseY - h2 * 0.55, px + w2, baseY);
+          c.closePath();
+          c.fill();
+        }
+      }
+    }
+
     // плот
     this.drawRaft(c);
 
     // ящики
     for (const cr of this.crates) this.drawCrate(c, cr);
 
-    // могилы и герои
-    for (const h of this.heroes) if (!h.alive && h.y < WORLD_H + 500) this.drawGrave(c, h);
+    // могилы и герои (под водой могил не ставим — тело ушло ко дну)
+    for (const h of this.heroes) {
+      if (!h.alive && h.y < WORLD_H + 500) {
+        const gw = this.waterLevelAt(h.x);
+        if (gw === null || this.surface(h.x) <= gw) this.drawGrave(c, h);
+      }
+    }
     const active = this.screen === "game" && this.order.length ? this.cur() : null;
     for (const h of this.heroes) if (h.alive) this.drawHero(c, h, h === active);
+
+    // лианы (джунгли, передний план)
+    if (jungle) {
+      for (const v of this.vines) {
+        if (v.x < xMin - 40 || v.x > xMax + 40) continue;
+        const sway = Math.sin(this.time * 0.9 + v.ph) * 14;
+        c.strokeStyle = "rgba(50,110,40,0.85)";
+        c.lineWidth = 3;
+        c.beginPath();
+        c.moveTo(v.x, -10);
+        c.quadraticCurveTo(v.x + sway * 0.4, v.len * 0.5, v.x + sway, v.len);
+        c.stroke();
+        c.lineWidth = 1.4;
+        c.strokeStyle = "rgba(70,140,50,0.9)";
+        for (let ly = 26; ly < v.len; ly += 26) {
+          const t = ly / v.len;
+          const lx = v.x + sway * t * t;
+          c.beginPath();
+          c.ellipse(lx + (ly % 52 === 0 ? 5 : -5), ly, 5.5, 2.4, ly % 52 === 0 ? 0.5 : -0.5, 0, Math.PI * 2);
+          c.stroke();
+        }
+      }
+    }
+
+    // светлячки (джунгли)
+    if (jungle) {
+      for (const ff of this.fireflies) {
+        const fx = ff.x + Math.sin(this.time * 0.6 + ff.ph) * 26;
+        const fy = ff.y + Math.cos(this.time * 0.45 + ff.ph) * 18;
+        const tw = 0.5 + 0.5 * Math.sin(this.time * 3 + ff.ph * 2);
+        const g = c.createRadialGradient(fx, fy, 0.5, fx, fy, 7);
+        g.addColorStop(0, `rgba(220,255,150,${0.7 * tw})`);
+        g.addColorStop(1, "rgba(220,255,150,0)");
+        c.fillStyle = g;
+        c.beginPath(); c.arc(fx, fy, 7, 0, Math.PI * 2); c.fill();
+        c.fillStyle = `rgba(250,255,200,${0.9 * tw})`;
+        c.beginPath(); c.arc(fx, fy, 1.6, 0, Math.PI * 2); c.fill();
+      }
+    }
 
     // снаряды
     for (const p of this.projs) this.drawProjectile(c, p);
@@ -2239,6 +2490,14 @@ export class Engine {
       g.addColorStop(0, "rgba(200,235,252,0.92)");
       g.addColorStop(0.35, "rgba(130,190,228,0.75)");
       g.addColorStop(1, "rgba(40,90,145,0.6)");
+    } else if (this.map === "jungle") {
+      g.addColorStop(0, "rgba(120,195,115,0.85)");
+      g.addColorStop(0.4, "rgba(40,110,70,0.8)");
+      g.addColorStop(1, "rgba(8,45,35,0.8)");
+    } else if (this.map === "inferno") {
+      g.addColorStop(0, "rgba(230,90,40,0.9)");
+      g.addColorStop(0.4, "rgba(150,30,20,0.85)");
+      g.addColorStop(1, "rgba(50,5,8,0.85)");
     } else {
       g.addColorStop(0, "rgba(95,185,240,0.9)");
       g.addColorStop(0.4, "rgba(45,120,190,0.8)");
@@ -2255,7 +2514,8 @@ export class Engine {
     c.fill();
 
     // линия поверхности
-    c.strokeStyle = frozen ? "rgba(255,255,255,0.92)" : "rgba(190,232,255,0.9)";
+    const infernoW = this.map === "inferno";
+    c.strokeStyle = frozen ? "rgba(255,255,255,0.92)" : infernoW ? "rgba(255,180,90,0.9)" : this.map === "jungle" ? "rgba(200,255,210,0.85)" : "rgba(190,232,255,0.9)";
     c.lineWidth = frozen ? 2.6 : 1.8;
     c.beginPath();
     for (let x = sa, first = true; x <= sb; x += 3) {
@@ -2287,12 +2547,24 @@ export class Engine {
         c.stroke();
       }
     } else {
-      c.fillStyle = "rgba(215,242,255,0.5)";
+      c.fillStyle = infernoW ? "rgba(255,200,120,0.5)" : this.map === "jungle" ? "rgba(190,255,200,0.4)" : "rgba(215,242,255,0.5)";
       const w = Math.max(1, sb - sa);
       for (let i = 0; i < 7; i++) {
         const gx = sa + ((this.time * 30 + i * (w / 7) * 1.6) % w);
         if (this.surface(gx) > level) {
           c.fillRect(gx, level + 4 + Math.sin(this.time * 2 + i) * 1.6, 13, 1.5);
+        }
+      }
+      // пузырьки Озера Проклятых
+      if (infernoW) {
+        for (let i = 0; i < 6; i++) {
+          const gx = sa + ((i * (w / 6)) + Math.sin(this.time * 1.3 + i) * 8);
+          const gy = level + 6 + Math.abs(Math.sin(this.time * 2.2 + i * 2)) * 10;
+          if (this.surface(gx) > level) {
+            c.strokeStyle = "rgba(255,160,80,0.6)";
+            c.lineWidth = 1.2;
+            c.beginPath(); c.arc(gx, gy, 2.2 + Math.sin(this.time * 3 + i) * 0.8, 0, Math.PI * 2); c.stroke();
+          }
         }
       }
     }
@@ -2784,15 +3056,6 @@ export class Engine {
     c.save();
     c.translate(h.x, h.y);
 
-    // при купании — полупрозрачный низ
-    const swimming = h.wet;
-    if (swimming) {
-      c.save();
-      c.beginPath();
-      c.rect(-30, -60, 60, 60 - (this.waterY - h.y));
-      c.clip();
-    }
-
     // командное кольцо
     c.strokeStyle = h.team === 0 ? "rgba(159,212,90,0.5)" : "rgba(224,80,56,0.5)";
     c.lineWidth = 2;
@@ -2982,19 +3245,6 @@ export class Engine {
     }
 
     c.restore();
-    if (swimming) c.restore();
-
-    // волны вокруг пловца
-    if (swimming) {
-      c.strokeStyle = "rgba(190,232,255,0.75)";
-      c.lineWidth = 1.6;
-      c.beginPath();
-      for (let x = -16; x <= 16; x += 2) {
-        const y = this.waterY + Math.sin(x * 0.4 + this.time * 5) * 1.2;
-        if (x === -16) c.moveTo(h.x + x, y); else c.lineTo(h.x + x, y);
-      }
-      c.stroke();
-    }
 
     // взмах ближнего боя
     if (h.swingT > 0) {
