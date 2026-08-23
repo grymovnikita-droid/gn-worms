@@ -322,10 +322,9 @@ export class Engine {
     this.canvas.style.height = h + "px";
     this.cw = w; this.ch = h;
     this.scale = Math.min(w / WORLD_W, h / WORLD_H);
-    // минимальный зум = вся карта на экране; отдаление свободное до этого предела
-    const sNeed = Math.max(w / WORLD_W, h / WORLD_H);
-    this.zoomMin = Math.max(1, sNeed / this.scale);
-    this.zoom = clamp(this.zoom, this.zoomMin, Math.max(3.2, this.zoomMin));
+    // минимальный зум = 1: вся карта целиком на экране; сверху небо, снизу жерло
+    this.zoomMin = 1;
+    this.zoom = clamp(this.zoom, 1, 3.2);
     this.oy = (h - WORLD_H * this.scale) / 2;
     this.camClamp();
   }
