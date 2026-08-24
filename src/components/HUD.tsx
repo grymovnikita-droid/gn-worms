@@ -93,7 +93,7 @@ export default function HUD({ snap, engine, onShop }: Props) {
               ? "Снаряд в воздухе…"
               : snap.phase === "settle"
                 ? "…"
-                : "A/D — движение · Пробел — прыжок · Зажми ЛКМ и отпусти для выстрела";
+                : "A/D — движение · Пробел — прыжок · ЛКМ — огонь · Q — ульта";
 
   return (
     <div className="absolute inset-0 z-10 pointer-events-none select-none">
@@ -254,8 +254,11 @@ export default function HUD({ snap, engine, onShop }: Props) {
                   {a.ultReady ? a.ultDesc : `Перезарядка: ${a.ultCd} х.`}
                 </span>
               </span>
-              <span className={`font-display font-800 text-[12px] tracking-widest shrink-0 ${a.ultReady ? "text-[#f5d67b]" : "text-[#7a86a0]"}`}>
-                {a.ultReady ? "УЛЬТА" : a.ultCd}
+              <span className="flex flex-col items-center gap-1 shrink-0">
+                <span className="kbd !text-[10px] !px-1.5 !py-0">Q</span>
+                <span className={`font-display font-800 text-[11px] tracking-widest ${a.ultReady ? "text-[#f5d67b]" : "text-[#7a86a0]"}`}>
+                  {a.ultReady ? "УЛЬТА" : a.ultCd}
+                </span>
               </span>
             </button>
           )}

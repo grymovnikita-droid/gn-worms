@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { DIFFS, MAPS, ITEMS, ARMORY_IDS, weaponById } from "../game/types";
 import type { Difficulty, MapId, BattleMode } from "../game/types";
-import { Emblem, ItemIcon, CoinIcon, SwordIcon, WeaponIcon, SkullIcon } from "./Icons";
+import { Emblem, ItemIcon, CoinIcon, SwordIcon, WeaponIcon, SkullIcon, UltIcon } from "./Icons";
 
 const EMBERS = Array.from({ length: 22 }, (_, i) => ({
   left: `${(i * 53) % 100}%`,
@@ -144,10 +144,29 @@ export default function MenuScreen({ onStart, onWorkshop }: { onStart: (d: Diffi
             </h1>
 
             <p className="mt-4 max-w-[540px] text-[16.5px] leading-relaxed text-[#cfc8b4]">
-              Разрушаемые холмы, шальной ветер и восемь героев на одной карте. Глубокое озеро делит мир
-              надвое — переправься <b className="text-[#e8b64a]">на плоту</b>, вплавь или Бликом, испепели
-              <b className="text-[#ff6a4d]"> Багровый Легион</b> и забери всё золото.
+              Разрушаемый мир, шальной ветер и <b className="text-[#e8b64a]">25 героев</b> с фирменными
+              <b className="text-[#e8b64a]"> ультами</b> — от Гнева Бога Грома до мины Техиса. Три линии,
+              глубокое озеро, переправа на плоту. Испепели <b className="text-[#ff6a4d]">Багровый Легион</b> и забери всё золото.
             </p>
+
+            {/* ключевые фичи */}
+            <div className="mt-4 flex flex-wrap gap-2">
+              <span className="clip-angled-sm panel px-3 py-1.5 text-[13px] font-bold text-[#d5cdb6] inline-flex items-center gap-2 hover:brightness-125 transition-all">
+                <UltIcon id="wrath" className="w-4 h-4 text-[#ffe95c]" />13 ульта-механик
+              </span>
+              <span className="clip-angled-sm panel px-3 py-1.5 text-[13px] font-bold text-[#d5cdb6] inline-flex items-center gap-2 hover:brightness-125 transition-all">
+                <UltIcon id="sunstrike" className="w-4 h-4 text-[#ffd27b]" />Три линии: топ · мид · бот
+              </span>
+              <span className="clip-angled-sm panel px-3 py-1.5 text-[13px] font-bold text-[#d5cdb6] inline-flex items-center gap-2 hover:brightness-125 transition-all">
+                <Emblem className="w-4 h-4" />25 героев Dota
+              </span>
+              <span className="clip-angled-sm panel px-3 py-1.5 text-[13px] font-bold text-[#d5cdb6] inline-flex items-center gap-2 hover:brightness-125 transition-all">
+                <svg viewBox="0 0 24 24" className="w-4 h-4 text-[#7fc4e8]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M12 3 C12 3 5.5 10.5 5.5 15 A6.5 6.5 0 0 0 18.5 15 C18.5 10.5 12 3 12 3 Z" fill="currentColor" fillOpacity="0.25" />
+                </svg>
+                Вода топит — только плот
+              </span>
+            </div>
 
             {/* команды */}
             <div className="mt-5 flex items-stretch gap-2">
@@ -246,7 +265,8 @@ export default function MenuScreen({ onStart, onWorkshop }: { onStart: (d: Diffi
                   [
                     [["Мышь"], "прицел · удержи ЛКМ — сила, отпусти — огонь"],
                     [["A", "D"], "движение · Пробел — прыжок"],
-                    [["1–8"], "выбор оружия · E — лавка"],
+                    [["1–8"], "выбор оружия"],
+                    [["Q"], "УЛЬТА героя · E — лавка"],
                     [["Колесо"], "масштаб · ПКМ — двигать камеру"],
                   ] as [string[], string][]
                 ).map(([keys, label], i) => (

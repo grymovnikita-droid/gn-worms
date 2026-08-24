@@ -20,6 +20,7 @@ export default function App() {
     const engine = new Engine(canvas, setSnap);
     engineRef.current = engine;
     engine.onShopClose = () => setShop(false);
+    engine.onShopOpen = () => { setShop(true); engineRef.current?.setShopOpen(true); };
     return () => {
       engine.destroy();
       engineRef.current = null;

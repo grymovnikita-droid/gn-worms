@@ -113,6 +113,7 @@ export class Engine {
   private ctx: CanvasRenderingContext2D;
   private onUI: (s: UISnapshot) => void;
   onShopClose: (() => void) | null = null;
+  onShopOpen: (() => void) | null = null;
 
   // мир
   private heights = new Float32Array(WORLD_W);
@@ -267,6 +268,13 @@ export class Engine {
         const slots = [h.sig, ...ARMORY_IDS];
         const idx = parseInt(k.slice(5), 10) - 1;
         if (slots[idx]) this.setWeapon(slots[idx]);
+      }
+    }
+    else if (k === "KeyQ") { this.toggleUltAim(); e.preventDefault(); }
+    else if (k === "KeyE") {
+      if (this.phase === "aim" && this.cur().team === 0) {
+        if (this.shopOpen) { this.shopOpen = false; this.onShopClose?.(); }
+        else this.onShopOpen?.();
       }
     }
   };
@@ -1904,6 +1912,12 @@ export class Engine {
     const enemies = this.heroes.filter((t) => t.team !== h.team && t.alive);
     this.finishUlt(h);
     sfx.zap();
+    // объявление ульта над героем (особенно заметно у ботов)
+    this.dmgNums.push({
+      x: h.x, y: h.y - 104, life: 1.6,
+      text: def.name.toUpperCase() + "!",
+      color: h.team === 0 ? "#f5d67b" : "#ff8c6a", size: 16,
+    });
 
     switch (m.k) {
       case "assassinate": {
@@ -3986,6 +4000,72 @@ export class Engine {
 
   /** Взмах, полоска HP, имя и вспышка урона — поверх любой модели (векторной или своей) */
   private drawHeroTop(c: CanvasRenderingContext2D, h: Hero, isActive: boolean, sp: SpriteConfig | null) {
+    const bodyTop = sp ? sp.h : 72;
+
+    // щит Оракула — мерцающий пузырь
+    if (h.shield) {
+      const pu = 1 + Math.sin(this.time * 6) * 0.06;
+      const g = c.createRadialGradient(h.x, h.y - bodyTop * 0.5, 4, h.x, h.y - bodyTop * 0.5, 42 * pu);
+      g.addColorStop(0, "rgba(232,208,240,0)");
+      g.addColorStop(0.75, "rgba(232,208,240,0.08)");
+      g.addColorStop(1, "rgba(232,208,240,0.3)");
+      c.fillStyle = g;
+      c.beginPath(); c.arc(h.x, h.y - bodyTop * 0.5, 42 * pu, 0, Math.PI * 2); c.fill();
+      c.strokeStyle = "rgba(232,208,240,0.85)";
+      c.lineWidth = 2;
+      c.setLineDash([7, 5]);
+      c.lineDashOffset = -this.time * 24;
+      c.beginPath(); c.arc(h.x, h.y - bodyTop * 0.5, 42 * pu, 0, Math.PI * 2); c.stroke();
+      c.setLineDash([]);
+    }
+
+    // оглушение — звёздочки над головой
+    if (h.stunLeft > 0) {
+      for (let i = 0; i < 3; i++) {
+        const a = this.time * 4 + (i * Math.PI * 2) / 3;
+        const sx = h.x + Math.cos(a) * 16;
+        const sy = h.y - bodyTop - 16 + Math.sin(a * 2) * 3;
+        c.fillStyle = "#ffe95c";
+        c.save();
+        c.translate(sx, sy);
+        c.rotate(a);
+        c.beginPath();
+        for (let k = 0; k < 8; k++) {
+          const r = k % 2 === 0 ? 4.4 : 1.9;
+          const aa = (k * Math.PI) / 4;
+          if (k === 0) c.moveTo(Math.cos(aa) * r, Math.sin(aa) * r);
+          else c.lineTo(Math.cos(aa) * r, Math.sin(aa) * r);
+        }
+        c.closePath();
+        c.fill();
+        c.restore();
+      }
+    }
+
+    // усиление Гримстроука — тёмное пламя ×2
+    if (h.buffMult > 1) {
+      for (let i = 0; i < 5; i++) {
+        const fx = h.x - 14 + i * 7;
+        const fh = 12 + Math.sin(this.time * 9 + i * 2) * 5;
+        const g = c.createLinearGradient(fx, h.y - bodyTop + 8, fx, h.y - bodyTop - fh);
+        g.addColorStop(0, "rgba(30,20,40,0.8)");
+        g.addColorStop(1, "rgba(176,154,224,0)");
+        c.fillStyle = g;
+        c.beginPath();
+        c.moveTo(fx - 3.4, h.y - bodyTop + 8);
+        c.quadraticCurveTo(fx, h.y - bodyTop - fh, fx + 3.4, h.y - bodyTop + 8);
+        c.closePath();
+        c.fill();
+      }
+      c.font = '900 11px "Rubik", sans-serif';
+      c.textAlign = "center";
+      c.fillStyle = "#f5d67b";
+      c.strokeStyle = "rgba(10,8,4,0.85)";
+      c.lineWidth = 3;
+      c.strokeText("×2", h.x, h.y - bodyTop - 6);
+      c.fillText("×2", h.x, h.y - bodyTop - 6);
+    }
+
     // взмах ближнего боя
     if (h.swingT > 0) {
       const wdef = weaponById[h.weapon];
