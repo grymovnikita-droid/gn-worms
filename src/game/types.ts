@@ -192,16 +192,20 @@ export interface UISnapshot {
   currentTeam: Team;
   isPlayerTurn: boolean;
   active: {
+    heroId: string;
     name: string; type: HeroTypeDef; sig: string;
     hp: number; maxHp: number;
     items: string[]; mekCount: number; blinkCd: number; canBlink: boolean;
     moveLeft: number; moveMax: number;
     weapon: string; ammo: Record<string, number>;
+    ultId: string; ultName: string; ultDesc: string; ultCd: number; ultReady: boolean;
+    shield: boolean; stunned: boolean; buffed: boolean;
+    minesLeft: number;
   } | null;
   gold: [number, number];
   teams: [
-    { name: string; type: HeroTypeDef; hp: number; maxHp: number; alive: boolean; current: boolean }[],
-    { name: string; type: HeroTypeDef; hp: number; maxHp: number; alive: boolean; current: boolean }[]
+    { heroId: string; name: string; type: HeroTypeDef; hp: number; maxHp: number; alive: boolean; current: boolean }[],
+    { heroId: string; name: string; type: HeroTypeDef; hp: number; maxHp: number; alive: boolean; current: boolean }[]
   ];
   timer: number;
   timerMax: number;

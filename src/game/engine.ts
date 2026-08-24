@@ -5,7 +5,7 @@
 import {
   WORLD_W, WORLD_H, GRAVITY, TURN_TIME, BASE_MOVE, BOOTS_MOVE, JUMP_COST,
   BLINK_RADIUS, INCOME_PER_TURN, KILL_GOLD, CRATE_GOLD, ROSTERS, ROSTERS_EXTRA,
-  ITEMS, ARMORY_IDS, weaponById,
+  ITEMS, ARMORY_IDS, weaponById, HEROES, heroById, ultById,
 } from "./types";
 import type { Team, Screen, Phase, Difficulty, UISnapshot, WeaponDef, MapId, BattleMode, HeroTypeDef } from "./types";
 import { sfx } from "./audio";
@@ -15,9 +15,12 @@ import type { WorkshopData, SpriteConfig } from "./workshop";
 // ---------- внутренние типы ----------
 interface Hero {
   team: Team;
+  heroId: string;
   type: HeroTypeDef;
   name: string;
   sig: string;
+  ult: string;
+  line: 0 | 1 | 2; // 0 = топ, 1 = мид, 2 = бот
   x: number; y: number; vy: number;
   hp: number; maxHp: number;
   alive: boolean;
@@ -32,6 +35,14 @@ interface Hero {
   swingT: number;
   weapon: string;
   ammo: Record<string, number>;
+  // ульта-система
+  ultCd: number;        // осталось ходов до готовности
+  usedUlt: boolean;     // ульта раз в ход
+  shield: boolean;      // щит Оракула (до начала след. хода)
+  stunLeft: number;     // ходы оглушения (Бэйн)
+  buffMult: number;     // множитель след. выстрела (Гримстроук)
+  healBlock: number;    // ходы блокировки лечения (АА)
+  minesLeft: number;    // активные мины героя
 }
 interface Proj {
   x: number; y: number; vx: number; vy: number;
@@ -42,6 +53,7 @@ interface Proj {
   shooter: Hero | null;
   wet?: boolean;
   pierce?: number;
+  dmgMul: number; // усиление ультой Гримстроука
 }
 interface Crate { x: number; y: number; vy: number; landed: boolean; kind: "gold" | "heal"; }
 interface Particle {
@@ -50,7 +62,7 @@ interface Particle {
   grav: number; kind: "spark" | "smoke" | "glow" | "coin" | "chunk" | "heal" | "ring" | "tele";
 }
 interface DmgNum { x: number; y: number; life: number; text: string; color: string; size: number; }
-interface AiState { stage: "think" | "move" | "aim" | "done"; t: number; dur: number; dir: number; angle: number; speed: number; beam?: boolean; }
+interface AiState { stage: "think" | "move" | "aim" | "done"; t: number; dur: number; dir: number; angle: number; speed: number; beam?: boolean; useUlt?: boolean; }
 interface Ember { x: number; y: number; vy: number; drift: number; size: number; phase: number; }
 interface Fire { x: number; y: number; r: number; t: number; dur: number; next: number; team: Team; }
 interface Beam { x1: number; y1: number; x2: number; y2: number; t: number; }
@@ -58,6 +70,11 @@ interface Tree { x: number; baseY: number; side: Team; s: number; seed: number; 
 interface Pull { h: Hero; fromX: number; fromY: number; toX: number; t: number; }
 interface Decal { x: number; y: number; r: number; life: number; max: number; }
 interface Spike { x: number; w: number; len: number; lean: number; }
+interface Turret { owner: Hero; x: number; y: number; shots: number; dmg: number; next: number; kind: "ward" | "serpent" | "treant"; t: number; }
+interface Mine { owner: Hero; x: number; y: number; t: number; }
+interface Zone { owner: Hero; x: number; y: number; r: number; dmg: number; t: number; dur: number; next: number; kind: "fire" | "poison" | "arcane"; }
+interface SkyStrike { x: number; y: number; t: number; dmg: number; radius: number; team: Team; }
+interface IceBlast { x: number; y: number; vx: number; vy: number; dmg: number; team: Team; t: number; }
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
@@ -150,6 +167,13 @@ export class Engine {
   private beams: Beam[] = [];
   private pulls: Pull[] = [];
   private decals: Decal[] = [];
+  // ульта-система: призванные сущности и отложенные эффекты
+  private turrets: Turret[] = [];
+  private mines: Mine[] = [];
+  private zones: Zone[] = [];
+  private skyStrikes: SkyStrike[] = [];
+  private iceBlasts: IceBlast[] = [];
+  private ultAim: string | null = null; // режим прицеливания ультой (assassinate/sunstrike)
   private winner: Team | null = null;
   private stats = { kills: [0, 0] as [number, number], dmg: [0, 0] as [number, number], gold: [0, 0] as [number, number] };
 
@@ -266,6 +290,7 @@ export class Engine {
     if (this.phase !== "aim" || this.cur().team !== 0) return;
     sfx.ensure();
     const p = this.toLogical(e.clientX, e.clientY);
+    if (this.ultAim) { this.ultAimAt(p.x, p.y); return; }
     if (this.blinkMode) { this.tryBlink(p.x, p.y); return; }
     this.updateAim(p.x, p.y);
     const def = weaponById[this.cur().weapon];
@@ -379,6 +404,12 @@ export class Engine {
     this.beams = [];
     this.pulls = [];
     this.decals = [];
+    this.turrets = [];
+    this.mines = [];
+    this.zones = [];
+    this.skyStrikes = [];
+    this.iceBlasts = [];
+    this.ultAim = null;
     this.blinkMode = false;
     this.charging = false;
     this.shake = 0;
@@ -530,6 +561,11 @@ export class Engine {
   useMek() {
     const h = this.cur();
     if (this.phase !== "aim" || h.team !== 0 || h.mek <= 0 || h.hp >= h.maxHp) return;
+    if (h.healBlock > 0) {
+      this.dmgNums.push({ x: h.x, y: h.y - 80, life: 1.2, text: "Хил заблокирован!", color: "#9fdcff", size: 14 });
+      sfx.click();
+      return;
+    }
     h.mek--;
     h.hp = Math.min(h.maxHp, h.hp + 45);
     sfx.heal();
@@ -1010,24 +1046,43 @@ export class Engine {
   }
 
   // ================= ГЕРОИ / ХОДЫ =================
+  // Три линии-сектора по горизонтали (топ / мид / бот), как в Dota.
+  private lineZones(team: Team): [number, number][] {
+    return team === 0
+      ? [[0.05, 0.17], [0.20, 0.33], [0.35, 0.47]]
+      : [[0.53, 0.65], [0.67, 0.80], [0.83, 0.95]];
+  }
+
+  private linePlan(count: number): (0 | 1 | 2)[] {
+    return count === 4 ? [1, 0, 2, 1] : [0, 1, 2, 0, 1, 2, 1, 0, 2, 1];
+  }
+
   private spawnHeroes() {
     this.heroes = [];
-    const fracs = spawnFracs(this.mode);
+    const plan = this.linePlan(this.mode);
     ([0, 1] as Team[]).forEach((team) => {
       const roster = this.mode === 10 ? [...ROSTERS[team], ...ROSTERS_EXTRA[team]] : ROSTERS[team];
-      roster.forEach((def, i) => {
-        const x = clamp(fracs[team][i] * WORLD_W + rand(-20, 20), 30, WORLD_W - 30);
+      const zones = this.lineZones(team);
+      const perLine: [number, number, number] = [0, 0, 0]; // сколько уже в каждой линии
+      roster.forEach((hid) => {
+        const def = heroById[hid];
+        const line = plan[this.heroes.filter((h) => h.team === team).length % plan.length];
+        const [za, zb] = zones[line];
+        const slot = perLine[line]++;
+        const span = (zb - za) * WORLD_W;
+        const x = clamp(za * WORLD_W + (span / 3) * slot + span * 0.16 + rand(-14, 14), 30, WORLD_W - 30);
         const ammo: Record<string, number> = {};
         for (const w of Object.values(weaponById)) {
           if (w.ammo !== -1 && (ARMORY_IDS.includes(w.id) || w.id === def.sig)) ammo[w.id] = w.ammo;
         }
         this.heroes.push({
-          team, type: def.type, name: def.name, sig: def.sig,
+          team, heroId: def.id, type: def.archetype, name: def.name, sig: def.sig, ult: def.ult, line,
           x, y: this.surface(x), vy: 0,
           hp: 100, maxHp: 100, alive: true, onGround: true, wet: false,
           items: new Set(), mek: 0, blinkCd: 0, usedBlink: false,
           flashT: 0, walkPhase: 0, swingT: 0,
           weapon: def.sig, ammo,
+          ultCd: 0, usedUlt: false, shield: false, stunLeft: 0, buffMult: 1, healBlock: 0, minesLeft: 0,
         });
       });
     });
@@ -1062,6 +1117,20 @@ export class Engine {
     if (h.team === 0) sfx.coin();
     if (h.blinkCd > 0) h.blinkCd--;
     h.usedBlink = false;
+    h.usedUlt = false;
+    if (h.ultCd > 0) h.ultCd--;
+    if (h.healBlock > 0) h.healBlock--;
+    h.shield = false; // щит живёт ровно один ход
+    // оглушённый герой пропускает ход
+    if (h.stunLeft > 0) {
+      h.stunLeft--;
+      this.dmgNums.push({ x: h.x, y: h.y - 80, life: 1.2, text: "ОГЛУШЁН — пропуск", color: "#b07ae0", size: 15 });
+      sfx.hurt();
+      this.phase = "settle";
+      this.settleT = 0.5;
+      this.emit();
+      return;
+    }
     this.moveMax = h.items.has("boots") ? BOOTS_MOVE : BASE_MOVE;
     this.moveLeft = this.moveMax;
     this.wind = Math.round(rand(-70, 70));
@@ -1141,6 +1210,7 @@ export class Engine {
       stage: "think", t: 0, dur: 0.7,
       dir: Math.random() < 0.45 ? (Math.random() < 0.5 ? -1 : 1) : 0,
       angle, speed, beam: useBeam,
+      useUlt: this.ultReady(h) && Math.random() < [0.35, 0.55, 0.8][this.difficulty],
     };
     if (h.mek > 0 && h.hp < h.maxHp - 40) {
       h.mek--; h.hp = Math.min(h.maxHp, h.hp + 45);
@@ -1183,7 +1253,9 @@ export class Engine {
       this.aimAngle = this.ai.angle;
       if (this.ai.t >= this.ai.dur) {
         this.ai.stage = "done";
-        if (this.ai.beam) {
+        if (this.ai.useUlt && this.ultReady(h)) {
+          this.castUlt(h);
+        } else if (this.ai.beam) {
           h.weapon = h.sig;
           const sd = weaponById[h.sig];
           if (sd.ammo !== -1) h.ammo[h.sig] = (h.ammo[h.sig] ?? 0) - 1;
@@ -1226,14 +1298,14 @@ export class Engine {
     this.launchProjectile(h, this.aimAngle, (SHOT_MIN + pw * SHOT_SPAN) * def.speedMul);
   }
 
-  private mkProj(x: number, y: number, angle: number, speed: number, def: WeaponDef, team: Team, mini = false, shooter: Hero | null = null): Proj {
+  private mkProj(x: number, y: number, angle: number, speed: number, def: WeaponDef, team: Team, mini = false, shooter: Hero | null = null, dmgMul = 1): Proj {
     return {
       x, y,
       vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
       def, team,
       fuseT: def.fuse ?? -1, lastFuseSec: 99,
       bounces: 0, spin: rand(0, 6), mini,
-      ox: x, oy: y, shooter,
+      ox: x, oy: y, shooter, dmgMul,
     };
   }
 
@@ -1241,16 +1313,20 @@ export class Engine {
     const def = weaponById[h.weapon];
     const mx = h.x + Math.cos(angle) * 22 * HS;
     const my = h.y - HERO_CY + Math.sin(angle) * 22 * HS;
+    // усиление Гримстроука: сгорает после выстрела
+    const mul = h.buffMult;
+    h.buffMult = 1;
     if (def.kind === "pellets") {
       const n = def.pellets ?? 5;
       for (let i = 0; i < n; i++) {
         const t = n === 1 ? 0.5 : i / (n - 1);
         const ang = angle + (t - 0.5) * 2 * (def.spread ?? 0.1) + rand(-0.015, 0.015);
-        this.projs.push(this.mkProj(mx, my, ang, speed * rand(0.9, 1.08), def, h.team));
+        this.projs.push(this.mkProj(mx, my, ang, speed * rand(0.9, 1.08), def, h.team, false, null, mul));
       }
     } else {
-      this.projs.push(this.mkProj(mx, my, angle, speed, def, h.team, false, def.kind === "hook" ? h : null));
+      this.projs.push(this.mkProj(mx, my, angle, speed, def, h.team, false, def.kind === "hook" ? h : null, mul));
     }
+    if (mul > 1) this.dmgNums.push({ x: mx, y: my - 20, life: 0.8, text: "×" + mul, color: "#f5d67b", size: 14 });
     this.phase = "flight";
     this.muzzleFx(mx, my, angle, def.kind === "pellets" ? 12 : 8);
     if (def.kind === "fuse") sfx.whoosh();
@@ -1456,13 +1532,13 @@ export class Engine {
     const def = p.def;
     const shooter = this.heroes.find((h) => h.team === p.team && h.alive);
     const aghs = shooter ? shooter.items.has("aghs") : false;
-    const mul = aghs ? 1.45 : 1;
+    const mul = (aghs ? 1.45 : 1) * p.dmgMul;
     const rmul = aghs ? 1.25 : 1;
 
     if (def.kind === "cluster" && !p.mini) {
       this.explode(p.x, p.y, 15 * rmul, 8 * mul, p.team, def, { endTurn: false, quiet: true });
       for (let k = 0; k < (def.clusters ?? 6); k++) {
-        this.projs.push(this.mkProj(p.x + rand(-8, 8), p.y + rand(-8, 8), 0, 0, def, p.team, true));
+        this.projs.push(this.mkProj(p.x + rand(-8, 8), p.y + rand(-8, 8), 0, 0, def, p.team, true, null, p.dmgMul));
         const m = this.projs[this.projs.length - 1];
         m.vx = rand(-300, 300);
         m.vy = -rand(280, 640);
@@ -1561,6 +1637,11 @@ export class Engine {
 
   private damageHero(h: Hero, dmg: number, srcTeam: Team) {
     if (!h.alive || dmg <= 0) return;
+    // щит Оракула полностью гасит урон
+    if (h.shield) {
+      this.dmgNums.push({ x: h.x, y: h.y - 80, life: 1, text: "ЩИТ!", color: "#e8d0f0", size: 15 });
+      return;
+    }
     h.hp -= dmg;
     h.flashT = 0.18;
     this.stats.dmg[srcTeam] += dmg;
@@ -1756,6 +1837,336 @@ export class Engine {
     this.emit();
   }
 
+  // ================= УЛЬТЫ =================
+  private ultReady(h: Hero) {
+    return h.ultCd <= 0 && !h.usedUlt && h.stunLeft <= 0;
+  }
+
+  /** Публичная кнопка ульы (игрок). Для точечных — включает режим прицела. */
+  toggleUltAim() {
+    const h = this.cur();
+    if (this.phase !== "aim" || h.team !== 0 || !this.ultReady(h)) return;
+    const m = ultById[h.ult].mechanic;
+    if (m.k === "assassinate" || m.k === "sunstrike") {
+      this.ultAim = this.ultAim === m.k ? null : m.k;
+      sfx.click();
+      this.emit();
+      return;
+    }
+    this.castUlt(h);
+  }
+
+  cancelUltAim() {
+    if (this.ultAim) { this.ultAim = null; this.emit(); }
+  }
+
+  /** Клик в режиме прицеливания ультой */
+  private ultAimAt(x: number, y: number) {
+    const h = this.cur();
+    if (!this.ultAim || !this.ultReady(h)) { this.ultAim = null; this.emit(); return; }
+    const m = ultById[h.ult].mechanic;
+    if (m.k === "assassinate") {
+      // нужен враг под курсором
+      let target: Hero | null = null;
+      for (const t of this.heroes) {
+        if (t.alive && t.team !== h.team && Math.hypot(t.x - x, t.y - HERO_CY - y) < 40) { target = t; break; }
+      }
+      if (!target) { this.dmgNums.push({ x, y: y - 20, life: 0.9, text: "Цель не поймана!", color: "#c9c2ae", size: 13 }); sfx.click(); return; }
+      this.ultAim = null;
+      this.finishUlt(h);
+      sfx.shoot(); sfx.zap();
+      this.beams.push({ x1: h.x, y1: h.y - HERO_CY, x2: target.x, y2: target.y - HERO_CY, t: 0.4 });
+      this.damageHero(target, m.dmg, h.team);
+      for (let i = 0; i < 10; i++) {
+        this.particles.push({ x: target.x + rand(-8, 8), y: target.y - HERO_CY + rand(-10, 10), vx: rand(-160, 160), vy: rand(-200, 40), life: 0.4, max: 0.4, size: 2.4, color: "#ffe95c", grav: 300, kind: "spark" });
+      }
+      this.phase = "settle"; this.settleT = 0.1;
+    } else if (m.k === "sunstrike") {
+      this.ultAim = null;
+      this.finishUlt(h);
+      sfx.zap();
+      this.skyStrikes.push({ x, y: this.surface(clamp(x, 0, WORLD_W - 1)), t: m.delay, dmg: m.dmg, radius: m.radius, team: h.team });
+      this.dmgNums.push({ x, y: this.surface(clamp(x, 0, WORLD_W - 1)) - 70, life: 1, text: "Прицел с неба!", color: "#ffd27b", size: 14 });
+    }
+    this.emit();
+  }
+
+  private finishUlt(h: Hero) {
+    h.usedUlt = true;
+    h.ultCd = ultById[h.ult].cd;
+  }
+
+  /** Немедленные ульы (все, кроме assassinate/sunstrike) */
+  private castUlt(h: Hero) {
+    if (!this.ultReady(h)) return;
+    const def = ultById[h.ult];
+    const m = def.mechanic;
+    const enemies = this.heroes.filter((t) => t.team !== h.team && t.alive);
+    this.finishUlt(h);
+    sfx.zap();
+
+    switch (m.k) {
+      case "global_bolt": {
+        // молния по каждому врагу
+        for (const t of enemies) {
+          this.beams.push({ x1: t.x + rand(-14, 14), y1: -40, x2: t.x, y2: t.y - HERO_CY, t: 0.35 });
+          this.explodeAt(t.x, t.y - 10, m.radius, m.dmg, h.team, "bolt");
+        }
+        this.whiteFlash = 0.7;
+        this.shake = Math.min(26, this.shake + 14);
+        sfx.explode(true);
+        break;
+      }
+      case "turret": {
+        for (let i = 0; i < m.count; i++) {
+          const side = i % 2 === 0 ? 1 : -1;
+          const tx = clamp(h.x + side * (34 + i * 26), 30, WORLD_W - 30);
+          this.turrets.push({
+            owner: h, x: tx, y: this.surface(tx), shots: m.shots, dmg: m.dmg,
+            next: 0.5 + i * 0.4, kind: m.count === 3 ? "serpent" : m.count === 2 ? "treant" : "ward", t: 0,
+          });
+        }
+        break;
+      }
+      case "mine": {
+        for (let i = 0; i < m.count; i++) {
+          const mx = clamp(h.x + (h.team === 0 ? 1 : -1) * (60 + i * 70) + rand(-20, 20), 30, WORLD_W - 30);
+          this.mines.push({ owner: h, x: mx, y: this.surface(mx), t: 0 });
+        }
+        h.minesLeft += m.count;
+        this.dmgNums.push({ x: h.x, y: h.y - 70, life: 1.2, text: "Мины установлены!", color: "#e0c060", size: 14 });
+        break;
+      }
+      case "dot_zone": {
+        // линия/область урона в направлении прицела
+        const dir = Math.cos(this.aimAngle) >= 0 ? 1 : -1;
+        const zx = clamp(h.x + dir * 130, 60, WORLD_W - 60);
+        this.zones.push({
+          owner: h, x: zx, y: this.surface(zx), r: m.radius, dmg: m.dmg,
+          t: 0, dur: m.dur, next: 0.25, kind: m.kind,
+        });
+        break;
+      }
+      case "self_aoe": {
+        const kind = m.kind;
+        this.explodeAt(h.x, h.y - 20, m.radius, m.dmg, h.team, kind === "frost" ? "ice" : kind === "poison" ? "poison" : "pulse");
+        if (kind === "poison" || kind === "frost") {
+          this.zones.push({ owner: h, x: h.x, y: this.surface(h.x), r: m.radius * 0.8, dmg: 5, t: 0, dur: 3, next: 0.5, kind: kind === "frost" ? "arcane" : "poison" });
+        }
+        break;
+      }
+      case "stun": {
+        // ближайший враг в зоне видимости
+        let target: Hero | null = null, bd = 1e9;
+        for (const t of enemies) {
+          const d = Math.abs(t.x - h.x);
+          if (d < 520 && d < bd) { bd = d; target = t; }
+        }
+        if (target) {
+          target.stunLeft = 1;
+          this.damageHero(target, m.dmg, h.team);
+          this.beams.push({ x1: h.x, y1: h.y - HERO_CY, x2: target.x, y2: target.y - HERO_CY, t: 0.5 });
+          this.dmgNums.push({ x: target.x, y: target.y - 80, life: 1.3, text: "ОГЛУШЁН", color: "#b07ae0", size: 16 });
+          for (let i = 0; i < 12; i++) {
+            this.particles.push({ x: target.x + rand(-10, 10), y: target.y - HERO_CY + rand(-14, 14), vx: rand(-90, 90), vy: rand(-140, 20), life: 0.5, max: 0.5, size: 2.6, color: "#b07ae0", grav: 200, kind: "spark" });
+          }
+        } else {
+          this.dmgNums.push({ x: h.x, y: h.y - 70, life: 1, text: "Никого в хватке…", color: "#c9c2ae", size: 13 });
+          h.usedUlt = false; h.ultCd = 0; // не тратим зря
+        }
+        break;
+      }
+      case "buff": {
+        h.buffMult = m.mult;
+        this.dmgNums.push({ x: h.x, y: h.y - 70, life: 1.3, text: "×2 УРОН!", color: "#f5d67b", size: 16 });
+        for (let i = 0; i < 10; i++) {
+          this.particles.push({ x: h.x + rand(-12, 12), y: h.y - rand(0, 40), vx: rand(-40, 40), vy: -rand(40, 120), life: 0.6, max: 0.6, size: 2.6, color: "#2a2a30", grav: -60, kind: "smoke" });
+        }
+        break;
+      }
+      case "shield": {
+        h.shield = true;
+        this.dmgNums.push({ x: h.x, y: h.y - 70, life: 1.3, text: "ЩИТ", color: "#e8d0f0", size: 16 });
+        break;
+      }
+      case "ice_blast": {
+        // глобальный снаряд через всю карту
+        const dir = h.team === 0 ? 1 : -1;
+        this.iceBlasts.push({ x: h.x + dir * 30, y: h.y - HERO_CY - 40, vx: dir * 820, vy: -120, dmg: m.dmg, team: h.team, t: 0 });
+        for (const t of enemies) t.healBlock = 3;
+        this.dmgNums.push({ x: h.x, y: h.y - 70, life: 1.2, text: "Хил заблокирован!", color: "#9fdcff", size: 13 });
+        break;
+      }
+      case "beam": {
+        // канал-луч в направлении прицела
+        this.aimBeamUlt(h, m.dmg);
+        break;
+      }
+      case "steal": {
+        // копируем ульту последнего убитого врага
+        const dead = this.heroes.filter((t) => t.team !== h.team && !t.alive);
+        if (dead.length) {
+          const last = dead[dead.length - 1];
+          h.ult = last.ult;
+          this.dmgNums.push({ x: h.x, y: h.y - 70, life: 1.3, text: "Украдено: " + ultById[h.ult].name, color: "#b09ae0", size: 13 });
+        } else {
+          this.dmgNums.push({ x: h.x, y: h.y - 70, life: 1, text: "Нечего красть…", color: "#c9c2ae", size: 13 });
+          h.usedUlt = false; h.ultCd = 0;
+        }
+        break;
+      }
+      default: break;
+    }
+    this.phase = "settle";
+    this.settleT = 0.15;
+    this.emit();
+  }
+
+  /** Луч Озарения — прожигает по линии прицела */
+  private aimBeamUlt(h: Hero, dmg: number) {
+    const a = this.aimAngle;
+    const dx = Math.cos(a), dy = Math.sin(a);
+    const x0 = h.x + dx * 24 * HS, y0 = h.y - HERO_CY + dy * 24 * HS;
+    let dist = 0, x1 = x0, y1 = y0;
+    while (dist < 1600) {
+      dist += 6;
+      x1 = x0 + dx * dist; y1 = y0 + dy * dist;
+      if (x1 < 0 || x1 > WORLD_W - 1) break;
+      if (y1 >= this.surface(x1) + 2) break;
+    }
+    for (let s2 = 0; s2 <= dist; s2 += 10) this.carve(x0 + dx * s2, y0 + dy * s2, 9);
+    for (const t of this.heroes) {
+      if (!t.alive) continue;
+      if (this.segDist(t.x, t.y - HERO_CY, x0, y0, x1, y1) < 30) {
+        this.damageHero(t, dmg, h.team);
+        t.vy = -200; t.onGround = false;
+      }
+    }
+    this.beams.push({ x1: x0, y1: y0, x2: x1, y2: y1, t: 0.55 });
+    this.shake = Math.min(26, this.shake + 10);
+  }
+
+  /** Универсальный взрыв с типом визуала */
+  private explodeAt(x: number, y: number, r: number, dmg: number, team: Team, kind: "boom" | "ice" | "poison" | "pulse" | "bolt") {
+    const def = kind === "ice" ? weaponById["frost"] : kind === "bolt" ? { ...weaponById["cannon"], radius: r, damage: dmg } : undefined;
+    this.explode(x, y, r, dmg, team, def, { endTurn: false, quiet: false });
+    if (kind === "poison") {
+      for (let i = 0; i < 12; i++) {
+        this.particles.push({ x: x + rand(-r * 0.5, r * 0.5), y: y + rand(-r * 0.4, r * 0.4), vx: rand(-50, 50), vy: -rand(30, 120), life: rand(0.5, 1), max: 1, size: rand(2, 4), color: "#7ee08a", grav: -40, kind: "smoke" });
+      }
+    }
+  }
+
+  /** Подрыв всех мин героя (кнопка) */
+  detonateMines() {
+    const h = this.cur();
+    if (this.phase !== "aim" || h.team !== 0) return;
+    const ms = this.mines.filter((mi) => mi.owner === h);
+    if (!ms.length) return;
+    for (const mi of ms) {
+      this.explode(mi.x, mi.y - 8, 55, 45, h.team, undefined, { endTurn: false, quiet: true });
+    }
+    this.mines = this.mines.filter((mi) => mi.owner !== h);
+    h.minesLeft = 0;
+    sfx.explode(true);
+    this.shake = Math.min(26, this.shake + 12);
+    this.phase = "settle"; this.settleT = 0.1;
+    this.emit();
+  }
+
+  /** Турели, зоны, небесные удары и ледяные снаряды живут независимо от фаз */
+  private updateUltEntities(dt: number) {
+    // турели
+    for (let i = this.turrets.length - 1; i >= 0; i--) {
+      const tu = this.turrets[i];
+      tu.t += dt;
+      if (!tu.owner.alive) { this.turrets.splice(i, 1); continue; }
+      tu.next -= dt;
+      if (tu.next <= 0 && tu.shots > 0) {
+        tu.shots--;
+        tu.next = 0.55;
+        const enemies = this.heroes.filter((h) => h.team !== tu.owner.team && h.alive);
+        if (enemies.length) {
+          const t = enemies[Math.floor(Math.random() * enemies.length)];
+          this.beams.push({ x1: tu.x, y1: tu.y - 26, x2: t.x, y2: t.y - HERO_CY, t: 0.25 });
+          this.damageHero(t, tu.dmg, tu.owner.team);
+          sfx.shoot();
+        }
+        if (tu.shots <= 0) this.turrets.splice(i, 1);
+      }
+    }
+    // мины: срабатывают, когда враг рядом
+    for (let i = this.mines.length - 1; i >= 0; i--) {
+      const mi = this.mines[i];
+      mi.t += dt;
+      for (const h of this.heroes) {
+        if (h.alive && h.team !== mi.owner.team && Math.hypot(h.x - mi.x, h.y - mi.y) < 34) {
+          this.explode(mi.x, mi.y - 8, 55, 45, mi.owner.team, undefined, { endTurn: false, quiet: true });
+          mi.owner.minesLeft = Math.max(0, mi.owner.minesLeft - 1);
+          this.mines.splice(i, 1);
+          sfx.explode(false);
+          break;
+        }
+      }
+    }
+    // зоны урона (огонь/яд/магия)
+    for (let i = this.zones.length - 1; i >= 0; i--) {
+      const z = this.zones[i];
+      z.t += dt;
+      z.next -= dt;
+      const col = z.kind === "fire" ? "#ff7a3b" : z.kind === "poison" ? "#7ee08a" : "#b09ae0";
+      if (Math.random() < dt * 14) {
+        this.particles.push({ x: z.x + rand(-z.r * 0.5, z.r * 0.5), y: z.y - rand(0, 26), vx: rand(-20, 20), vy: -rand(40, 120), life: 0.5, max: 0.5, size: rand(2, 4), color: col, grav: z.kind === "poison" ? -30 : -90, kind: "spark" });
+      }
+      if (z.next <= 0) {
+        z.next = 0.5;
+        for (const h of this.heroes) {
+          if (h.alive && h.team !== z.owner.team && Math.abs(h.x - z.x) < z.r && h.y > z.y - 90 && h.y < z.y + 20) {
+            this.damageHero(h, z.dmg, z.owner.team);
+          }
+        }
+      }
+      if (z.t >= z.dur) this.zones.splice(i, 1);
+    }
+    // небесные удары (Инвокер)
+    for (let i = this.skyStrikes.length - 1; i >= 0; i--) {
+      const s = this.skyStrikes[i];
+      s.t -= dt;
+      if (s.t <= 0) {
+        this.beams.push({ x1: s.x, y1: -60, x2: s.x, y2: s.y, t: 0.3 });
+        this.explodeAt(s.x, s.y - 10, s.radius, s.dmg, s.team, "boom");
+        sfx.explode(true);
+        this.whiteFlash = Math.min(1, this.whiteFlash + 0.5);
+        this.skyStrikes.splice(i, 1);
+      }
+    }
+    // ледяные снаряды (АА) — летят через всю карту
+    for (let i = this.iceBlasts.length - 1; i >= 0; i--) {
+      const ib = this.iceBlasts[i];
+      ib.t += dt;
+      ib.vy += 260 * dt;
+      ib.x += ib.vx * dt;
+      ib.y += ib.vy * dt;
+      if (Math.random() < dt * 30) {
+        this.particles.push({ x: ib.x, y: ib.y, vx: rand(-20, 20), vy: rand(-20, 20), life: 0.3, max: 0.3, size: 2.2, color: "#9fdcff", grav: 0, kind: "smoke" });
+      }
+      let hit = false;
+      for (const h of this.heroes) {
+        if (h.alive && h.team !== ib.team && Math.hypot(h.x - ib.x, h.y - HERO_CY - ib.y) < 22) {
+          this.damageHero(h, ib.dmg, ib.team);
+          this.explodeAt(ib.x, ib.y, 44, 10, ib.team, "ice");
+          hit = true;
+          break;
+        }
+      }
+      const sy = this.surface(clamp(ib.x, 0, WORLD_W - 1));
+      if (hit || ib.y > sy || ib.x < -50 || ib.x > WORLD_W + 50) {
+        if (!hit && ib.y > sy) this.explodeAt(ib.x, sy - 10, 44, ib.dmg, ib.team, "ice");
+        this.iceBlasts.splice(i, 1);
+      }
+    }
+  }
+
   // ================= UPDATE =================
   private update(dt: number) {
     this.updateLakeBounds(); // вода всегда следует за рельефом (кратеры, взрывы)
@@ -1796,6 +2207,7 @@ export class Engine {
       this.decals[i].life -= dt;
       if (this.decals[i].life <= 0) this.decals.splice(i, 1);
     }
+    this.updateUltEntities(dt);
     for (const t of this.trees) {
       if (t.alive && this.surface(t.x) > t.baseY + 26) {
         t.alive = false;
@@ -2350,6 +2762,9 @@ export class Engine {
 
     // ящики
     for (const cr of this.crates) this.drawCrate(c, cr);
+
+    // ульта-сущности: зоны, мины, турели, ледяные снаряды
+    this.drawUltEntities(c);
 
     // могилы и герои (под водой могил не ставим — тело ушло ко дну)
     for (const h of this.heroes) {
@@ -3382,18 +3797,12 @@ export class Engine {
     c.translate(0, -bob);
     c.scale(dir * HS, HS);
 
-    const body: Record<string, [string, string]> = {
-      sniper: ["#4a6b3a", "#2e4425"],
-      cm: ["#4f7fb8", "#33547d"],
-      jugg: ["#8a4526", "#5e2e19"],
-      lina: ["#b8452f", "#7d2d1e"],
-      pudge: ["#7a6a52", "#554a38"],
-      axe: ["#8a3a2c", "#59241a"],
-      lich: ["#2e5878", "#1d3a52"],
-      drow: ["#4a3b55", "#302638"],
-    };
-    const [main, dark] = body[h.type] || ["#5a5a5a", "#3a3a3a"];
-    const skin = h.type === "pudge" ? "#a3b18c" : h.type === "lich" ? "#93a9ba" : h.type === "drow" ? "#cfc4da" : "#d8b48e";
+    // палитра берётся из таблицы 20 героев, поэтому каждый уникален
+    const hd = heroById[h.heroId];
+    const main = hd ? hd.main : "#5a5a5a";
+    const dark = hd ? hd.dark : "#3a3a3a";
+    const accent = hd ? hd.accent : "#c9b458";
+    const skin = hd ? hd.skin : "#d8b48e";
     const teamC = h.team === 0 ? "#d9a441" : "#e05038";
 
     // плащ
@@ -3485,6 +3894,11 @@ export class Engine {
     c.strokeStyle = teamC;
     c.lineWidth = 2.4;
     c.beginPath(); c.moveTo(-wide * 0.42, -27.5); c.lineTo(wide * 0.56, -15.8); c.stroke();
+    // акцентный самоцвет на груди — уникален для каждого из 20 героев
+    c.fillStyle = accent;
+    c.beginPath(); c.arc(wide * 0.3, -22.5, 2.2, 0, Math.PI * 2); c.fill();
+    c.fillStyle = "rgba(255,255,255,0.5)";
+    c.beginPath(); c.arc(wide * 0.24, -23.2, 0.8, 0, Math.PI * 2); c.fill();
 
     this.drawHeroTorso(c, h.type, wide);
 
@@ -4012,12 +4426,100 @@ export class Engine {
     c.restore();
   }
 
+  // ---------- отрисовка ульта-сущностей ----------
+  private drawUltEntities(c: CanvasRenderingContext2D) {
+    // зоны урона
+    for (const z of this.zones) {
+      const col = z.kind === "fire" ? "rgba(255,122,59," : z.kind === "poison" ? "rgba(126,224,138," : "rgba(176,154,224,";
+      const g = c.createRadialGradient(z.x, z.y, 4, z.x, z.y, z.r);
+      g.addColorStop(0, col + "0.30)");
+      g.addColorStop(1, col + "0)");
+      c.fillStyle = g;
+      c.beginPath(); c.ellipse(z.x, z.y, z.r, z.r * 0.5, 0, 0, Math.PI * 2); c.fill();
+      c.strokeStyle = col + "0.5)";
+      c.lineWidth = 2;
+      c.setLineDash([6, 5]);
+      c.lineDashOffset = -this.time * 20;
+      c.beginPath(); c.ellipse(z.x, z.y, z.r, z.r * 0.5, 0, 0, Math.PI * 2); c.stroke();
+      c.setLineDash([]);
+    }
+    // мины
+    for (const mi of this.mines) {
+      c.save();
+      c.translate(mi.x, mi.y - 5);
+      c.fillStyle = "#5e5a4e";
+      c.beginPath(); c.arc(0, 0, 7, Math.PI, 0); c.closePath(); c.fill();
+      c.strokeStyle = "#3a372e";
+      c.lineWidth = 1.4;
+      c.stroke();
+      const blink = Math.sin(this.time * 6 + mi.t) > 0;
+      c.fillStyle = blink ? "#ff4433" : "#7a2018";
+      c.beginPath(); c.arc(0, -4, 2, 0, Math.PI * 2); c.fill();
+      c.restore();
+    }
+    // турели
+    for (const tu of this.turrets) {
+      c.save();
+      c.translate(tu.x, tu.y);
+      const sway = Math.sin(this.time * 2.4 + tu.x) * 0.08;
+      c.rotate(sway);
+      if (tu.kind === "serpent") {
+        c.fillStyle = "#4a7a3a";
+        c.beginPath(); c.ellipse(0, -10, 5, 12, 0, 0, Math.PI * 2); c.fill();
+        c.fillStyle = "#7ee08a";
+        c.beginPath(); c.arc(-1.5, -18, 1.5, 0, Math.PI * 2); c.arc(1.5, -18, 1.5, 0, Math.PI * 2); c.fill();
+      } else if (tu.kind === "treant") {
+        c.fillStyle = "#5a4026";
+        c.fillRect(-5, -26, 10, 26);
+        c.fillStyle = "#3f7433";
+        c.beginPath(); c.arc(0, -30, 11, 0, Math.PI * 2); c.arc(-8, -24, 8, 0, Math.PI * 2); c.arc(8, -24, 8, 0, Math.PI * 2); c.fill();
+      } else {
+        c.fillStyle = "#6a5a4a";
+        c.fillRect(-4, -24, 8, 24);
+        c.fillStyle = "#c8b060";
+        c.beginPath(); c.arc(0, -26, 6, 0, Math.PI * 2); c.fill();
+        c.fillStyle = "#3a2a1a";
+        c.beginPath(); c.arc(0, -26, 2.4, 0, Math.PI * 2); c.fill();
+      }
+      c.restore();
+      // счётчик выстрелов
+      c.fillStyle = "rgba(245,214,123,0.9)";
+      c.font = '700 10px "Rubik", sans-serif';
+      c.textAlign = "center";
+      c.fillText("×" + tu.shots, tu.x, tu.y - (tu.kind === "treant" ? 44 : 36));
+    }
+    // небесные удары (прицел с неба)
+    for (const s of this.skyStrikes) {
+      c.strokeStyle = "rgba(255,210,123,0.7)";
+      c.lineWidth = 2;
+      c.setLineDash([8, 6]);
+      c.lineDashOffset = this.time * 30;
+      c.beginPath(); c.moveTo(s.x, -40); c.lineTo(s.x, s.y); c.stroke();
+      c.setLineDash([]);
+      c.beginPath(); c.arc(s.x, s.y, s.radius * (0.5 + s.t * 0.5), 0, Math.PI * 2); c.stroke();
+    }
+    // ледяные снаряды
+    for (const ib of this.iceBlasts) {
+      c.save();
+      c.translate(ib.x, ib.y);
+      c.rotate(Math.atan2(ib.vy, ib.vx));
+      const g = c.createLinearGradient(-14, 0, 10, 0);
+      g.addColorStop(0, "rgba(159,220,255,0)");
+      g.addColorStop(1, "rgba(159,220,255,0.9)");
+      c.fillStyle = g;
+      c.beginPath(); c.moveTo(-14, -4); c.lineTo(10, 0); c.lineTo(-14, 4); c.closePath(); c.fill();
+      c.fillStyle = "#dff4ff";
+      c.beginPath(); c.arc(8, 0, 4, 0, Math.PI * 2); c.fill();
+      c.restore();
+    }
+  }
+
   // ================= UI SNAPSHOT =================
   private emit() {
     const h = this.order.length ? this.cur() : null;
     const mapTeam = (team: Team) =>
       this.heroes.filter((x) => x.team === team).map((x) => ({
-        name: x.name, type: x.type, hp: Math.max(0, Math.round(x.hp)), maxHp: x.maxHp, alive: x.alive, current: x === h,
+        heroId: x.heroId, name: x.name, type: x.type, hp: Math.max(0, Math.round(x.hp)), maxHp: x.maxHp, alive: x.alive, current: x === h,
       }));
     const snap: UISnapshot = {
       screen: this.screen,
@@ -4030,11 +4532,16 @@ export class Engine {
       isPlayerTurn: !!h && h.team === 0,
       active: h && this.screen === "game"
         ? {
+            heroId: h.heroId,
             name: h.name, type: h.type, sig: h.sig,
             hp: Math.max(0, Math.round(h.hp)), maxHp: h.maxHp,
             items: Array.from(h.items), mekCount: h.mek, blinkCd: h.blinkCd,
             canBlink: this.canBlink(h), moveLeft: Math.round(this.moveLeft), moveMax: this.moveMax,
             weapon: h.weapon, ammo: { ...h.ammo },
+            ultId: h.ult, ultName: ultById[h.ult].name, ultDesc: ultById[h.ult].desc,
+            ultCd: h.ultCd, ultReady: this.ultReady(h),
+            shield: h.shield, stunned: h.stunLeft > 0, buffed: h.buffMult > 1,
+            minesLeft: h.minesLeft,
           }
         : null,
       gold: [Math.round(this.teamGold[0]), Math.round(this.teamGold[1])],
