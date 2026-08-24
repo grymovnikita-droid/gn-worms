@@ -235,3 +235,119 @@ export function WeaponIcon({ id, className = "w-6 h-6" }: P & { id: string }) {
       return null;
   }
 }
+
+// Иконки ульта — по id ульта
+export function UltIcon({ id, className = "w-6 h-6" }: P & { id: string }) {
+  const common = { className, fill: "none" as const, stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
+  switch (id) {
+    case "wrath": // молния по всем
+      return (
+        <svg viewBox="0 0 24 24" {...common}>
+          <path d="M13 2 L6 13 H11 L9 22 L18 10 H13 L15 2 Z" fill="currentColor" fillOpacity="0.25" />
+          <path d="M4 6 L2 8 M20 6 L22 8 M12 0.5 V-1" strokeOpacity="0.5" />
+        </svg>
+      );
+    case "assassinate": // прицел
+      return (
+        <svg viewBox="0 0 24 24" {...common}>
+          <circle cx="12" cy="12" r="7" />
+          <circle cx="12" cy="12" r="1.6" fill="currentColor" />
+          <path d="M12 2 V6 M12 18 V22 M2 12 H6 M18 12 H22" />
+        </svg>
+      );
+    case "sunstrike": // удар с неба
+      return (
+        <svg viewBox="0 0 24 24" {...common}>
+          <circle cx="12" cy="7" r="3.4" fill="currentColor" fillOpacity="0.3" />
+          <path d="M12 1.5 V3.4 M6.6 4 L8 5.4 M17.4 4 L16 5.4" />
+          <path d="M12 11 V16 M8 20 L12 16 L16 20 M5 22 H19" strokeOpacity="0.8" />
+        </svg>
+      );
+    case "deathward": case "serpents": case "treants": // тотем/башня
+      return (
+        <svg viewBox="0 0 24 24" {...common}>
+          <path d="M9 22 V10 M15 22 V10 M7 22 H17" />
+          <path d="M9 10 Q12 4 15 10" fill="currentColor" fillOpacity="0.25" />
+          <circle cx="12" cy="8.5" r="1.4" fill="currentColor" />
+        </svg>
+      );
+    case "mines": // мина
+      return (
+        <svg viewBox="0 0 24 24" {...common}>
+          <circle cx="12" cy="14" r="6" fill="currentColor" fillOpacity="0.22" />
+          <path d="M12 8 V5 M12 5 L14 3 M6.5 9.5 L4.5 7.5 M17.5 9.5 L19.5 7.5" />
+          <circle cx="14.4" cy="3" r="1.1" fill="currentColor" />
+        </svg>
+      );
+    case "macropyre": case "illuminate": // огонь/луч
+      return (
+        <svg viewBox="0 0 24 24" {...common}>
+          <path d="M12 2 C14 6 18 8 18 13 A6 6 0 0 1 6 13 C6 10 8 8 9 6 C9.5 8 10.5 9 12 9 C11 6 11.5 4 12 2 Z" fill="currentColor" fillOpacity="0.25" />
+        </svg>
+      );
+    case "mystic": // магическая зона
+      return (
+        <svg viewBox="0 0 24 24" {...common}>
+          <circle cx="12" cy="12" r="8" strokeOpacity="0.5" strokeDasharray="3 3" />
+          <path d="M12 6 L13.5 10.5 L18 12 L13.5 13.5 L12 18 L10.5 13.5 L6 12 L10.5 10.5 Z" fill="currentColor" fillOpacity="0.3" />
+        </svg>
+      );
+    case "pulse": case "freeze": // волна вокруг
+      return (
+        <svg viewBox="0 0 24 24" {...common}>
+          <circle cx="12" cy="12" r="2.6" fill="currentColor" fillOpacity="0.4" />
+          <circle cx="12" cy="12" r="6" strokeOpacity="0.7" />
+          <circle cx="12" cy="12" r="9.5" strokeOpacity="0.35" strokeDasharray="4 3" />
+        </svg>
+      );
+    case "poison": // ядовитое облако
+      return (
+        <svg viewBox="0 0 24 24" {...common}>
+          <path d="M7 16 A4 4 0 0 1 7 8 A5 5 0 0 1 16.5 7 A4.5 4.5 0 0 1 17 16 Z" fill="currentColor" fillOpacity="0.25" />
+          <circle cx="10" cy="12" r="1" fill="currentColor" /><circle cx="14" cy="11" r="1" fill="currentColor" />
+        </svg>
+      );
+    case "grip": // хватка
+      return (
+        <svg viewBox="0 0 24 24" {...common}>
+          <path d="M7 3 C5 7 5 12 7 16 M17 3 C19 7 19 12 17 16" />
+          <circle cx="12" cy="12" r="3.4" fill="currentColor" fillOpacity="0.3" />
+          <path d="M8 20 L12 16 L16 20" strokeOpacity="0.7" />
+        </svg>
+      );
+    case "ink": // усиление
+      return (
+        <svg viewBox="0 0 24 24" {...common}>
+          <path d="M5 12 H15 M15 12 L11 8 M15 12 L11 16" />
+          <path d="M18 5 L21 8 L18 11 M19 14 L22 17" strokeOpacity="0.7" />
+        </svg>
+      );
+    case "promise": // щит
+      return (
+        <svg viewBox="0 0 24 24" {...common}>
+          <path d="M12 2 L20 5 V12 C20 17 16.5 20.5 12 22 C7.5 20.5 4 17 4 12 V5 Z" fill="currentColor" fillOpacity="0.25" />
+          <path d="M9 11.5 L11 13.5 L15 9" />
+        </svg>
+      );
+    case "iceblast": // ледяной снаряд
+      return (
+        <svg viewBox="0 0 24 24" {...common}>
+          <circle cx="12" cy="12" r="6" fill="currentColor" fillOpacity="0.22" />
+          <path d="M12 6 V18 M6.8 9 L17.2 15 M17.2 9 L6.8 15" strokeOpacity="0.8" />
+        </svg>
+      );
+    case "steal": // кража
+      return (
+        <svg viewBox="0 0 24 24" {...common}>
+          <path d="M8 7 A6 6 0 0 1 19 9 M19 9 V5 M19 9 H15" />
+          <path d="M16 17 A6 6 0 0 1 5 15 M5 15 V19 M5 15 H9" strokeOpacity="0.7" />
+        </svg>
+      );
+    default:
+      return (
+        <svg viewBox="0 0 24 24" {...common}>
+          <circle cx="12" cy="12" r="8" />
+        </svg>
+      );
+  }
+}

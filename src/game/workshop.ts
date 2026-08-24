@@ -2,6 +2,7 @@
 // Мастерская: пользовательские модели и элементы
 // Хранит спрайты (dataURL) + их габариты в localStorage
 // ============================================================
+import { HEROES, ultById, weaponById } from "./types";
 
 export interface SpriteConfig {
   dataUrl: string;
@@ -50,16 +51,17 @@ export interface SlotDef {
  * Габариты задаются в мировых пикселях карты.
  * Якорь модели героя — НИЗ ПО ЦЕНТРУ (ступни стоят на земле).
  * Стандартный векторный герой ≈ 40×68 мировых px.
+ * Слоты героев генерируются из таблицы 20 героев.
  */
 export const SLOT_DEFS: SlotDef[] = [
-  { key: "sniper", name: "Снайпер", kind: "hero", dw: 40, dh: 68, hint: "Дальний выстрел" },
-  { key: "cm", name: "Кристал Мейден", kind: "hero", dw: 40, dh: 68, hint: "Ледяная Нова" },
-  { key: "jugg", name: "Джаггернаут", kind: "hero", dw: 40, dh: 68, hint: "Омниклинок" },
-  { key: "lina", name: "Лина", kind: "hero", dw: 40, dh: 68, hint: "Луч Лагуны" },
-  { key: "pudge", name: "Пудж", kind: "hero", dw: 40, dh: 68, hint: "Тесак мясника" },
-  { key: "axe", name: "Акс", kind: "hero", dw: 40, dh: 68, hint: "Бросок топора" },
-  { key: "lich", name: "Лич", kind: "hero", dw: 40, dh: 68, hint: "Кольцо Мороза" },
-  { key: "drow", name: "Дроу", kind: "hero", dw: 40, dh: 68, hint: "Залп стрел" },
+  ...HEROES.map((h) => ({
+    key: h.id,
+    name: h.name,
+    kind: "hero" as const,
+    dw: 40,
+    dh: 68,
+    hint: `${ultById[h.ult].name} · ${weaponById[h.sig].name}`,
+  })),
   { key: "crate", name: "Подарок (ящик)", kind: "obj", dw: 40, dh: 34, hint: "Падает с парашютом" },
   { key: "bg", name: "Задний фон неба", kind: "bg", dw: 0, dh: 0, hint: "Растягивается на весь экран" },
 ];

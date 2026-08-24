@@ -1,7 +1,7 @@
 import type { UISnapshot } from "../game/types";
 import { TEAM_NAMES, ARMORY_IDS, weaponById } from "../game/types";
 import type { Engine } from "../game/engine";
-import { ItemIcon, CoinIcon, WindIcon, PauseIcon, SoundIcon, SkullIcon, WeaponIcon } from "./Icons";
+import { ItemIcon, CoinIcon, WindIcon, PauseIcon, SoundIcon, SkullIcon, WeaponIcon, UltIcon } from "./Icons";
 
 interface Props { snap: UISnapshot; engine: Engine; onShop: () => void; }
 
@@ -79,17 +79,21 @@ export default function HUD({ snap, engine, onShop }: Props) {
   const playerAim = snap.isPlayerTurn && snap.phase === "aim";
   const shopAllowed = playerAim && !snap.paused && snap.winner === null;
 
-  const hint = snap.blinkMode
-    ? "Кликни точку внутри круга — герой мерцает и исчезает"
-    : snap.winner !== null
-      ? ""
-      : !snap.isPlayerTurn
-        ? "Легион совещается…"
-        : snap.phase === "flight"
-          ? "Снаряд в воздухе…"
-          : snap.phase === "settle"
-            ? "…"
-            : "A/D — движение · Пробел — прыжок · Зажми ЛКМ и отпусти для выстрела";
+  const hint = snap.active?.ultAim === "assassinate"
+    ? "Кликни по врагу в красном прицеле — Ликвидация!"
+    : snap.active?.ultAim === "sunstrike"
+      ? "Наведи на точку и кликни — удар с неба!"
+      : snap.blinkMode
+        ? "Кликни точку внутри круга — герой мерцает и исчезает"
+        : snap.winner !== null
+          ? ""
+          : !snap.isPlayerTurn
+            ? "Легион совещается…"
+            : snap.phase === "flight"
+              ? "Снаряд в воздухе…"
+              : snap.phase === "settle"
+                ? "…"
+                : "A/D — движение · Пробел — прыжок · Зажми ЛКМ и отпусти для выстрела";
 
   return (
     <div className="absolute inset-0 z-10 pointer-events-none select-none">
@@ -156,6 +160,13 @@ export default function HUD({ snap, engine, onShop }: Props) {
               <div className="h-full bg-gradient-to-r from-[#3f6f8f] to-[#7fc4e8] transition-all duration-150" style={{ width: `${(a.moveLeft / a.moveMax) * 100}%` }} />
             </div>
           </div>
+          {(a.shield || a.stunned || a.buffed) && (
+            <div className="mt-2 flex gap-1.5 flex-wrap">
+              {a.shield && <span className="text-[10px] font-800 tracking-wider px-2 py-0.5 bg-[#3a2a4a] text-[#e8d0f0] border border-[#b07ae0]">ЩИТ</span>}
+              {a.stunned && <span className="text-[10px] font-800 tracking-wider px-2 py-0.5 bg-[#4a2a2a] text-[#ff9a8a] border border-[#e05038]">ОГЛУШЁН</span>}
+              {a.buffed && <span className="text-[10px] font-800 tracking-wider px-2 py-0.5 bg-[#4a422a] text-[#f5d67b] border border-[#d9a441]">УРОН ×2</span>}
+            </div>
+          )}
         </div>
       )}
 
@@ -208,7 +219,47 @@ export default function HUD({ snap, engine, onShop }: Props) {
                 </span>
               </button>
             )}
+            {a && a.minesLeft > 0 && (
+              <button
+                onClick={() => engine.detonateMines()}
+                title="Подорвать все установленные мины"
+                className="relative w-[58px] h-[58px] grid place-items-center clip-angled-sm panel-gold text-[#ff8c3b] transition-all hover:scale-105 active:scale-95 animate-pulse"
+              >
+                <UltIcon id="mines" className="w-8 h-8" />
+                <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-[20px] px-1 grid place-items-center bg-[#4a2a1a] border border-[#ff8c3b] text-[12px] font-bold text-[#ffd0a8]">
+                  {a.minesLeft}
+                </span>
+              </button>
+            )}
           </div>
+
+          {/* УЛЬТА */}
+          {a && (
+            <button
+              onClick={() => engine.toggleUltAim()}
+              disabled={!a.ultReady}
+              title={`${a.ultName}: ${a.ultDesc}`}
+              className={`relative w-full clip-angled-sm px-4 py-2.5 flex items-center gap-3 border transition-all ${
+                a.ultReady
+                  ? "panel-gold border-[#f5d67b] text-[#f5d67b] shadow-[0_0_20px_rgba(245,214,123,0.35)] hover:brightness-125 active:scale-95"
+                  : "panel border-[#38466a] opacity-70"
+              }`}
+            >
+              <UltIcon id={a.ultId} className="w-7 h-7 shrink-0" />
+              <span className="min-w-0 flex-1 text-left">
+                <span className={`block font-display font-800 text-[13px] tracking-[0.12em] leading-tight ${a.ultReady ? "text-[#f5d67b]" : "text-[#7a86a0]"}`}>
+                  {a.ultName.toUpperCase()}
+                </span>
+                <span className={`block text-[11px] leading-tight ${a.ultReady ? "text-[#d5c9a0]" : "text-[#5f6b84]"}`}>
+                  {a.ultReady ? a.ultDesc : `Перезарядка: ${a.ultCd} х.`}
+                </span>
+              </span>
+              <span className={`font-display font-800 text-[12px] tracking-widest shrink-0 ${a.ultReady ? "text-[#f5d67b]" : "text-[#7a86a0]"}`}>
+                {a.ultReady ? "УЛЬТА" : a.ultCd}
+              </span>
+            </button>
+          )}
+
           <div className="flex gap-2.5">
             <button onClick={onShop} disabled={!shopAllowed} className="btn-war px-5 py-2.5 text-[15px] inline-flex items-center gap-2">
               <CoinIcon className="w-5 h-5" /> ЛАВКА

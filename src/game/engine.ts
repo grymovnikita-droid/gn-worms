@@ -1906,6 +1906,28 @@ export class Engine {
     sfx.zap();
 
     switch (m.k) {
+      case "assassinate": {
+        // авто-выбор (для ИИ): добиваем самого раненого
+        const target = [...enemies].sort((p, q) => p.hp - q.hp)[0];
+        if (target) {
+          sfx.shoot(); sfx.zap();
+          this.beams.push({ x1: h.x, y1: h.y - HERO_CY, x2: target.x, y2: target.y - HERO_CY, t: 0.4 });
+          this.damageHero(target, m.dmg, h.team);
+          for (let i = 0; i < 10; i++) {
+            this.particles.push({ x: target.x + rand(-8, 8), y: target.y - HERO_CY + rand(-10, 10), vx: rand(-160, 160), vy: rand(-200, 40), life: 0.4, max: 0.4, size: 2.4, color: "#ffe95c", grav: 300, kind: "spark" });
+          }
+        }
+        break;
+      }
+      case "sunstrike": {
+        // авто-выбор (для ИИ): бьём по случайному врагу
+        const target = enemies[Math.floor(Math.random() * enemies.length)];
+        if (target) {
+          sfx.zap();
+          this.skyStrikes.push({ x: target.x + rand(-20, 20), y: this.surface(clamp(target.x, 0, WORLD_W - 1)), t: m.delay, dmg: m.dmg, radius: m.radius, team: h.team });
+        }
+        break;
+      }
       case "global_bolt": {
         // молния по каждому врагу
         for (const t of enemies) {
@@ -2836,8 +2858,9 @@ export class Engine {
 
     // прицел игрока
     if (this.screen === "game" && active && active.team === 0 && active.alive) {
-      if (this.phase === "aim" && !this.blinkMode) this.drawAim(c, active);
+      if (this.phase === "aim" && !this.blinkMode && !this.ultAim) this.drawAim(c, active);
       if (this.blinkMode) this.drawBlink(c, active);
+      if (this.ultAim) this.drawUltAim(c, active);
     }
 
     this.drawParticles(c);
@@ -3780,7 +3803,7 @@ export class Engine {
     c.beginPath(); c.ellipse(0, -1, 16.5, 4.8, 0, 0, Math.PI * 2); c.fill();
 
     // пользовательская модель из мастерской (якорь — низ по центру, стоит на земле)
-    const spr = this.spriteOf(h.type);
+    const spr = this.spriteOf(h.heroId);
     if (spr) {
       const walkingS = h.onGround && isActive && this.moveInput !== 0;
       const bobS = walkingS ? Math.abs(Math.sin(h.walkPhase)) * 1.5 : 0;
@@ -4401,6 +4424,56 @@ export class Engine {
     }
   }
 
+  /** Прицел ульта: assassinate (выбор врага) / sunstrike (точка на земле) */
+  private drawUltAim(c: CanvasRenderingContext2D, h: Hero) {
+    c.save();
+    if (this.ultAim === "assassinate") {
+      // подсвечиваем всех врагов — по кому кликнешь, в того и выстрел
+      for (const t of this.heroes) {
+        if (t.team === h.team || !t.alive) continue;
+        const pulse = 10 + Math.sin(this.time * 6) * 2;
+        c.strokeStyle = "rgba(255,70,60,0.9)";
+        c.lineWidth = 2.4;
+        c.beginPath(); c.arc(t.x, t.y - HERO_CY, pulse + 16, 0, Math.PI * 2); c.stroke();
+        c.strokeStyle = "rgba(255,70,60,0.4)";
+        c.lineWidth = 1.4;
+        c.beginPath();
+        c.moveTo(t.x - pulse - 24, t.y - HERO_CY); c.lineTo(t.x - pulse - 12, t.y - HERO_CY);
+        c.moveTo(t.x + pulse + 12, t.y - HERO_CY); c.lineTo(t.x + pulse + 24, t.y - HERO_CY);
+        c.moveTo(t.x, t.y - HERO_CY - pulse - 24); c.lineTo(t.x, t.y - HERO_CY - pulse - 12);
+        c.moveTo(t.x, t.y - HERO_CY + pulse + 12); c.lineTo(t.x, t.y - HERO_CY + pulse + 24);
+        c.stroke();
+      }
+    } else if (this.ultAim === "sunstrike") {
+      // точка, куда упадёт удар: идём по лучу прицела до земли
+      const a = this.aimAngle;
+      const dx = Math.cos(a), dy = Math.sin(a);
+      const x0 = h.x + dx * 24 * HS, y0 = h.y - HERO_CY + dy * 24 * HS;
+      let dist = 0, gx = x0, gy = y0;
+      while (dist < 1600) {
+        dist += 6;
+        gx = x0 + dx * dist; gy = y0 + dy * dist;
+        if (gx < 0 || gx > WORLD_W - 1) break;
+        if (gy >= this.surface(gx) + 2) break;
+      }
+      const r = 34 + Math.sin(this.time * 5) * 3;
+      // столб света с неба
+      const g = c.createLinearGradient(gx, -60, gx, gy);
+      g.addColorStop(0, "rgba(255,210,123,0)");
+      g.addColorStop(1, "rgba(255,190,80,0.35)");
+      c.fillStyle = g;
+      c.fillRect(gx - 26, -60, 52, gy + 60);
+      c.strokeStyle = "rgba(255,210,123,0.9)";
+      c.lineWidth = 2.6;
+      c.beginPath(); c.arc(gx, gy, r, 0, Math.PI * 2); c.stroke();
+      c.strokeStyle = "rgba(255,210,123,0.45)";
+      c.lineWidth = 1.6;
+      c.beginPath(); c.arc(gx, gy, r + 10, 0, Math.PI * 2); c.stroke();
+      c.beginPath(); c.moveTo(gx - r - 16, gy); c.lineTo(gx + r + 16, gy); c.moveTo(gx, gy - r - 16); c.lineTo(gx, gy + r + 16); c.stroke();
+    }
+    c.restore();
+  }
+
   private drawBlink(c: CanvasRenderingContext2D, h: Hero) {
     c.save();
     c.strokeStyle = "rgba(245,214,123,0.55)";
@@ -4542,6 +4615,7 @@ export class Engine {
             ultCd: h.ultCd, ultReady: this.ultReady(h),
             shield: h.shield, stunned: h.stunLeft > 0, buffed: h.buffMult > 1,
             minesLeft: h.minesLeft,
+            ultAim: this.ultAim,
           }
         : null,
       gold: [Math.round(this.teamGold[0]), Math.round(this.teamGold[1])],

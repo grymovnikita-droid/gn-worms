@@ -168,6 +168,11 @@ export const HEROES: HeroDef[] = [
   { id: "veno", name: "Веномансер", archetype: "drow", main: "#4a8a4a", dark: "#2e5e2e", accent: "#7ee08a", skin: "#a0c8a0", sig: "volley", ult: "poison" },
   { id: "bane", name: "Бэйн", archetype: "lich", main: "#5a3a6a", dark: "#3a2246", accent: "#b07ae0", skin: "#a898b8", sig: "frost", ult: "grip" },
   { id: "oracle", name: "Оракул", archetype: "cm", main: "#c8a8d8", dark: "#8a7098", accent: "#e8d0f0", skin: "#e0d0e0", sig: "frost", ult: "promise" },
+  { id: "disruptor", name: "Дисраптор", archetype: "lich", main: "#4a5a8a", dark: "#303a5e", accent: "#7fc4e8", skin: "#b0a8c0", sig: "frost", ult: "grip" },
+  { id: "grimstroke", name: "Гримстроук", archetype: "lina", main: "#3a3a4a", dark: "#22222e", accent: "#c0c0d0", skin: "#c8b8a0", sig: "laguna", ult: "ink" },
+  { id: "aa", name: "Древний Аппарит", archetype: "lich", main: "#5a8ab8", dark: "#3a5e80", accent: "#bfe8ff", skin: "#a8c8e0", sig: "nova", ult: "iceblast" },
+  { id: "rubick", name: "Рубик", archetype: "cm", main: "#4a8a5a", dark: "#2e5e3a", accent: "#7ee08a", skin: "#d0c8a0", sig: "frost", ult: "steal" },
+  { id: "skywrath", name: "Скайрат Маг", archetype: "lina", main: "#8a7a3a", dark: "#5e5222", accent: "#ffe95c", skin: "#e0d0b0", sig: "laguna", ult: "mystic" },
 ];
 export const heroById: Record<string, HeroDef> = Object.fromEntries(HEROES.map((h) => [h.id, h]));
 
@@ -201,6 +206,7 @@ export interface UISnapshot {
     ultId: string; ultName: string; ultDesc: string; ultCd: number; ultReady: boolean;
     shield: boolean; stunned: boolean; buffed: boolean;
     minesLeft: number;
+    ultAim: string | null;
   } | null;
   gold: [number, number];
   teams: [
